@@ -14,7 +14,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 仅拷贝运行所需文件；.env 等密钥文件不进镜像（见 .dockerignore）
-COPY server.py agent.py tools.py ./
+COPY server.py ./
+COPY agents ./agents
+COPY tools ./tools
 COPY ui ./ui
 
 EXPOSE 8623

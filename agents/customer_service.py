@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
-"""ECCS Agent：LangGraph ReAct 智能体（OpenAI 兼容接口）。
+"""客服智能体（Customer Service Agent）：LangGraph ReAct（OpenAI 兼容接口）。
 
-结构：
-- 配置了 OPENAI_API_KEY 时：走真实 LLM，Agent 自主调用订单/物流/售后/推荐工具后生成回复；
-- 未配置 Key 或调用失败时：自动退回本地规则引擎（tools + classic_reply），保证演示不断线。
+- 配置了 OPENAI_API_KEY 时：走真实 LLM，自主调用订单/物流/售后/推荐工具后生成回复；
+- 未配置 Key 或调用失败时：返回 None，由 supervisor / server 转入本地规则兜底（classic_reply）。
 
 安全约定：本模块从不保存密钥，OPENAI_API_KEY 只从环境变量 / .env 读取。
 """
@@ -43,6 +42,7 @@ def _build_react_agent(llm, tools):
         except TypeError:
             return create_react_agent(model=llm, tools=tools, state_modifier=SYSTEM_PROMPT)
 
+
 SYSTEM_PROMPT = """你是「ECCS」跨境电商智能客服 Agent，面向海外（日本）消费者、当前以中文演示。
 
 工作方式：根据用户问题，自主决定是否调用工具获取事实，再用自然语言作答：
@@ -58,8 +58,8 @@ SYSTEM_PROMPT = """你是「ECCS」跨境电商智能客服 Agent，面向海外
 4. 不要向用户暴露工具名称、JSON 等内部实现细节。"""
 
 
-class Agent:
-    """LangGraph 客服智能体。graph 为 None 表示运行在本地兜底模式。"""
+class CustomerServiceAgent:
+    """客服智能体。graph 为 None 表示运行在本地兜底模式。"""
 
     def __init__(
         self,
@@ -144,7 +144,7 @@ class Agent:
 
 
 # ============================================================================
-# 本地兜底路由：未配置 Key / 后端异常 / 纯静态预览时，给出与前端演示一致的体验
+# 本地兜底路由：未配置 Key / 后端异常时，给出与前端演示一致的体验
 # ============================================================================
 def classic_reply(q: str) -> dict:
     """关键词路由 + 结构化卡片数据，返回 {reply, intent, data}。"""

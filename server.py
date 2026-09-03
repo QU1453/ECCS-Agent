@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from agent import Agent, classic_reply
+from agents import Supervisor, classic_reply
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")  # 读取本地密钥配置（已被 .gitignore 拦截）
@@ -61,22 +61,22 @@ class AskRequest(BaseModel):
 
 
 class AgentService:
-    """懒加载单例 Agent + 会话记忆（最多保留最近 20 条）。"""
+    """懒加载单例 Supervisor（多智能体主控）+ 会话记忆（最多保留最近 20 条）。"""
 
     def __init__(self) -> None:
-        self._agent: Agent | None = None
+        self._supervisor: Supervisor | None = None
         self.sessions: dict[str, list[dict]] = {}
 
-    def agent(self) -> Agent:
-        if self._agent is None:
-            self._agent = Agent(api_key=API_KEY, base_url=BASE_URL, model=MODEL)
-        return self._agent
+    def supervisor(self) -> Supervisor:
+        if self._supervisor is None:
+            self._supervisor = Supervisor(api_key=API_KEY, base_url=BASE_URL, model=MODEL)
+        return self._supervisor
 
     def ask(self, message: str, session_id: str) -> dict:
-        agent = self.agent()
+        sup = self.supervisor()
         history = self.sessions.setdefault(session_id, [])
-        # 真实 LLM：携带上下文多轮对话
-        result = agent.answer(message, history) if agent.available else None
+        # 真实 LLM：携带上下文多轮对话（supervisor 调度专职智能体）
+        result = sup.answer(message, history) if sup.available else None
         if result and result.get("reply"):
             history.append({"role": "user", "content": message})
             history.append({"role": "assistant", "content": result["reply"]})
@@ -91,13 +91,13 @@ service = AgentService()
 
 @app.get("/api/status")
 async def status() -> dict:
-    agent = service.agent()
+    sup = service.supervisor()
     return {
         "ok": True,
-        "agent": agent.available,
-        "mode": "llm" if agent.available else "local-fallback",
-        "model": agent.model if agent.available else None,
-        "reason": agent.reason,
+        "agent": sup.available,
+        "mode": "llm" if sup.available else "local-fallback",
+        "model": sup.model if sup.available else None,
+        "reason": sup.reason,
     }
 
 
@@ -113,5 +113,5 @@ async def ask(req: AskRequest) -> JSONResponse:
 if __name__ == "__main__":
     import uvicorn
 
-    print(f"ECCS Agent 已启动 → http://{HOST}:{PORT}  （{service.agent().reason or 'LLM 模式'}）")
+    print(f"ECCS Agent 已启动 → http://{HOST}:{PORT}  （{service.supervisor().reason or 'LLM 模式'}）")
     uvicorn.run(app, host=HOST, port=PORT)

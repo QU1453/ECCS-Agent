@@ -29,14 +29,16 @@
 | --- | --- |
 | 桌面容器 | Python + pywebview（Windows WebView2，开发中） |
 | 后端服务 | FastAPI + uvicorn（`server.py`，同一端口托管前端） |
-| 智能体 | LangGraph ReAct（`agent.py`）：LLM 自主决策 → 工具调用 → 回复生成 |
-| 客服工具 | `tools.py`：订单查询 / 物流跟踪 / 退换货办理 / 商品推荐（演示数据） |
+| 智能体 | LangGraph ReAct（`agents/`）：supervisor 主控调度专职智能体，LLM 自主决策 → 工具调用 → 回复生成 |
+| 客服工具 | `tools/`：订单查询 / 物流跟踪 / 退换货办理 / 商品推荐（演示数据，多智能体共享） |
 | 界面 | 原生 HTML / CSS / JS（`ui/`，可直接独立预览） |
-| 兜底引擎 | 未配置 Key 时 `agent.py` 内置关键词路由，效果与前端演示一致 |
+| 兜底引擎 | 未配置 Key 时 `agents/customer_service.py` 内置关键词路由，效果与前端演示一致 |
 | 容器化 | Docker + docker-compose（`Dockerfile` / `docker-compose.yml` / `.dockerignore`） |
 | 打包 | PyInstaller（onefile，规划中） |
 
-数据链路：`网页输入 → POST /api/ask → Agent 调用工具 → 返回 {reply, intent, data} → 前端渲染气泡/卡片`。
+数据链路：`网页输入 → POST /api/ask → supervisor 调度专职智能体 → 工具调用 → 返回 {reply, intent, data} → 前端渲染气泡/卡片`。
+
+**多智能体扩展**：新增智能体 = 在 `agents/` 加一个文件（参考 `customer_service.py`）并在 `supervisor.py` 注册；工具放 `tools/` 供所有智能体共享，互不干扰。三人三分支协作时，可各自认领一个智能体文件开发，Git 冲突面最小。
 
 ## 目录结构
 
@@ -48,8 +50,14 @@
 ├── Dockerfile        # 单服务镜像（Python 3.12 slim）
 ├── docker-compose.yml# 一键编排：端口 8623，Key 走环境变量注入
 ├── server.py         # FastAPI 后端入口：托管 ui + /api/ask
-├── agent.py          # LangGraph 智能体 + 无 Key 本地兜底路由
-├── tools.py          # 客服工具与演示数据（订单/物流/售后/推荐）
+├── agents/           # 智能体目录（多智能体协作，一人一文件）
+│   ├── supervisor.py       # 主控智能体：统一入口，调度专职智能体
+│   └── customer_service.py # 客服智能体（LangGraph + 无 Key 本地兜底）
+├── tools/            # 工具目录（各智能体共享）
+│   ├── catalog.py    # 商品演示库
+│   ├── order.py      # 订单 / 物流查询
+│   ├── after_sales.py# 退换货办理
+│   └── recommend.py  # 商品推荐
 ├── requirements.txt  # Python 依赖
 ├── .env.example      # 密钥配置样例（复制为 .env 后填写，不入库）
 └── ui/
