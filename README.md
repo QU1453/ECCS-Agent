@@ -79,8 +79,8 @@
 | 槽位 | 变量 | 说明 | 示例 |
 | --- | --- | --- | --- |
 | API Key | `OPENAI_API_KEY` | 真实密钥，只放 `.env` / 环境变量，绝不入库 | `sk-...` |
-| 请求地址 | `OPENAI_BASE_URL` | OpenAI 官方留空；第三方 / 自部署（DeepSeek、通义、本地 vLLM 等）填 base_url | `https://api.deepseek.com/v1` |
-| 模型 ID | `OPENAI_MODEL` | OpenAI 兼容的模型名 | `gpt-4o-mini` / `deepseek-chat` |
+| 请求地址 | `OPENAI_BASE_URL` | 本项目默认**智谱开放平台**（OpenAI 兼容）；OpenAI 官方留空 | `https://open.bigmodel.cn/api/paas/v4` |
+| 模型 ID | `OPENAI_MODEL` | 本项目默认 **GLM-5.3-Flash**；兼容 OpenAI 协议的模型名均可 | `glm-5.3-flash` |
 
 填写方式（二选一）：
 

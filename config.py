@@ -22,11 +22,11 @@ load_dotenv(BASE_DIR / ".env")  # 读取本地密钥配置（已被 .gitignore �
 # API Key：真实密钥只放 .env / 环境变量，代码与仓库中不出现
 API_KEY: str | None = os.getenv("OPENAI_API_KEY", "").strip() or None
 
-# 请求地址：OpenAI 官方留空即可；第三方 / 自部署（DeepSeek、通义、本地 vLLM 等）填 base_url
+# 请求地址：OpenAI 官方留空即可；本项目默认智谱 GLM（OpenAI 兼容）
 BASE_URL: str | None = os.getenv("OPENAI_BASE_URL", "").strip() or None
 
-# 模型 ID：如 gpt-4o-mini / deepseek-chat / qwen-plus 等
-MODEL_ID: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+# 模型 ID：本项目默认 GLM-5.3-Flash（智谱开放平台），兼容 OpenAI 协议
+MODEL_ID: str = os.getenv("OPENAI_MODEL", "glm-5.3-flash").strip() or "glm-5.3-flash"
 
 # ===== 服务配置 =====
 HOST: str = os.getenv("SERVER_HOST", "127.0.0.1")
