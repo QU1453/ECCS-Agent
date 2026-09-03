@@ -1,0 +1,67 @@
+# ===== 安全防护：API Key / 密钥文件（绝对禁止上传）=====
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+id_rsa
+id_ed25519
+credentials*.json
+service-account*.json
+secret*.json
+secrets.*
+config/secret*
+config/*credentials*
+*.token
+api_key*.txt
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ===== Node =====
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# ===== 日志 / 临时文件 =====
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+
+# ===== IDE / 系统 =====
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== 大文件 / 模型权重 =====
+*.pt
+*.pth
+*.onnx
+*.bin
+*.h5
+*.model
+model_weights/
+checkpoints/
+
+# ===== 数据库 =====
+*.db
+*.sqlite
+*.sqlite3
