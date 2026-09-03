@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 
+from memory import get_checkpointer, thread_id_for
 from tools import (
     handle_return,
     lookup_order,
@@ -32,15 +33,16 @@ except Exception:  # pragma: no cover - 离线环境 / 未安装依赖时
     ChatOpenAI = None
 
 
-def _build_react_agent(llm, tools):
+def _build_react_agent(llm, tools, checkpointer=None):
     """兼容不同 langgraph 版本：1.x 用 prompt=，旧版用 messages_modifier/state_modifier=。"""
-    try:
-        return create_react_agent(model=llm, tools=tools, prompt=SYSTEM_PROMPT)
-    except TypeError:
+    for prompt_kw in ("prompt", "messages_modifier", "state_modifier"):
         try:
-            return create_react_agent(model=llm, tools=tools, messages_modifier=SYSTEM_PROMPT)
+            return create_react_agent(
+                model=llm, tools=tools, checkpointer=checkpointer, **{prompt_kw: SYSTEM_PROMPT}
+            )
         except TypeError:
-            return create_react_agent(model=llm, tools=tools, state_modifier=SYSTEM_PROMPT)
+            continue
+    raise TypeError("create_react_agent 参数签名不兼容")
 
 
 SYSTEM_PROMPT = """你是「ECCS」跨境电商智能客服 Agent，面向海外（日本）消费者、当前以中文演示。
@@ -79,7 +81,8 @@ class CustomerServiceAgent:
         try:
             llm = ChatOpenAI(model=model, api_key=api_key, base_url=base_url or None, temperature=0.3)
             tools = [query_order_info, track_logistics, handle_return, recommend_products]
-            self._graph = _build_react_agent(llm, tools)
+            # 多轮记忆：memory/ 提供的 checkpointer 按 thread_id 隔离会话
+            self._graph = _build_react_agent(llm, tools, checkpointer=get_checkpointer())
         except Exception as exc:  # noqa: BLE001
             self.reason = f"Agent 初始化失败（{exc.__class__.__name__}: {exc}）"
 
@@ -87,22 +90,29 @@ class CustomerServiceAgent:
     def available(self) -> bool:
         return self._graph is not None
 
-    def answer(self, question: str, history: list[dict] | None = None) -> dict | None:
-        """调用 LLM Agent，返回 {reply, intent, data}；失败返回 None（交由兜底）。"""
+    def answer(self, question: str, session_id: str = "default") -> dict | None:
+        """调用 LLM Agent，返回 {reply, intent, data}；失败返回 None（交由兜底）。
+
+        多轮记忆：checkpointer 按 thread_id（= session_id）自动携带历史上下文，
+        无需手动拼接 history。
+        """
         if not self.available:
             return None
         try:
-            messages = [m for m in (history or []) if m.get("content")]
-            messages.append({"role": "user", "content": question})
-            result = self._graph.invoke({"messages": messages})
-            return self._format_result(result)
+            config = {"configurable": {"thread_id": thread_id_for(session_id)}}
+            # 记录本轮前的消息数：invoke 返回的是整条 thread 的全量消息，
+            # 卡片提取只看本轮新增部分，避免把旧轮工具调用误当卡片
+            state = self._graph.get_state(config)
+            prev_count = len(state.values.get("messages", [])) if (state and state.values) else 0
+            result = self._graph.invoke({"messages": [{"role": "user", "content": question}]}, config)
+            return self._format_result(result, prev_count)
         except Exception:  # noqa: BLE001 - 网络/额度/格式异常都交给兜底
             return None
 
     # ---------- 内部：把 Agent 运行结果整理为结构化回复 ----------
     @staticmethod
-    def _format_result(result: dict) -> dict:
-        msgs = result.get("messages") or []
+    def _format_result(result: dict, prev_count: int = 0) -> dict:
+        msgs = (result.get("messages") or [])[prev_count:]
         reply = ""
         intent, data = "none", None
         for m in reversed(msgs):

@@ -32,11 +32,14 @@
 | 智能体 | LangGraph ReAct（`agents/`）：supervisor 主控调度专职智能体，LLM 自主决策 → 工具调用 → 回复生成 |
 | 客服工具 | `tools/`：订单查询 / 物流跟踪 / 退换货办理 / 商品推荐（演示数据，多智能体共享） |
 | 界面 | 原生 HTML / CSS / JS（`ui/`，可直接独立预览） |
+| 记忆 | `memory/`：LangGraph MemorySaver 短期会话记忆（thread_id 隔离，多轮上下文自动携带） |
 | 兜底引擎 | 未配置 Key 时 `agents/customer_service.py` 内置关键词路由，效果与前端演示一致 |
 | 容器化 | Docker + docker-compose（`Dockerfile` / `docker-compose.yml` / `.dockerignore`） |
 | 打包 | PyInstaller（onefile，规划中） |
 
 数据链路：`网页输入 → POST /api/ask → supervisor 调度专职智能体 → 工具调用 → 返回 {reply, intent, data} → 前端渲染气泡/卡片`。
+
+**记忆机制**：LLM 模式下，多轮对话记忆由 `memory/` 提供的 LangGraph checkpointer（MemorySaver）托管——按 `session_id` 映射 thread_id，自动携带历史上下文，server 端无需自行管理会话；进程内有效，重启清空（需要持久化时替换为 SqliteSaver 落盘）。未配置 Key 的兜底模式为单轮无记忆。长期记忆（用户画像 / 跨会话偏好）规划中，届时在 `memory/` 下新增 `long_term.py`。
 
 **多智能体扩展**：新增智能体 = 在 `agents/` 加一个文件（参考 `customer_service.py`）并在 `supervisor.py` 注册；工具放 `tools/` 供所有智能体共享，互不干扰。三人三分支协作时，可各自认领一个智能体文件开发，Git 冲突面最小。
 
@@ -58,6 +61,8 @@
 │   ├── order.py      # 订单 / 物流查询
 │   ├── after_sales.py# 退换货办理
 │   └── recommend.py  # 商品推荐
+├── memory/           # 记忆目录（多智能体共享）
+│   └── short_term.py # 短期会话记忆：MemorySaver 单例 + thread_id 规则
 ├── requirements.txt  # Python 依赖
 ├── .env.example      # 密钥配置样例（复制为 .env 后填写，不入库）
 └── ui/

@@ -17,6 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY server.py ./
 COPY agents ./agents
 COPY tools ./tools
+COPY memory ./memory
 COPY ui ./ui
 
 EXPOSE 8623

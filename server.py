@@ -61,11 +61,10 @@ class AskRequest(BaseModel):
 
 
 class AgentService:
-    """懒加载单例 Supervisor（多智能体主控）+ 会话记忆（最多保留最近 20 条）。"""
+    """懒加载单例 Supervisor（多智能体主控）；多轮记忆由 memory/ 的 checkpointer 托管。"""
 
     def __init__(self) -> None:
         self._supervisor: Supervisor | None = None
-        self.sessions: dict[str, list[dict]] = {}
 
     def supervisor(self) -> Supervisor:
         if self._supervisor is None:
@@ -74,15 +73,11 @@ class AgentService:
 
     def ask(self, message: str, session_id: str) -> dict:
         sup = self.supervisor()
-        history = self.sessions.setdefault(session_id, [])
-        # 真实 LLM：携带上下文多轮对话（supervisor 调度专职智能体）
-        result = sup.answer(message, history) if sup.available else None
+        # 真实 LLM：多轮记忆 = LangGraph MemorySaver 按 thread_id(session_id) 隔离
+        result = sup.answer(message, session_id) if sup.available else None
         if result and result.get("reply"):
-            history.append({"role": "user", "content": message})
-            history.append({"role": "assistant", "content": result["reply"]})
-            del history[:-20]  # 控制记忆长度
             return result
-        # 兜底：未配置 Key / Agent 不可用 / 调用异常
+        # 兜底：未配置 Key / Agent 不可用 / 调用异常（单轮，无记忆）
         return classic_reply(message)
 
 

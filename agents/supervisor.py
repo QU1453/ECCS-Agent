@@ -39,6 +39,9 @@ class Supervisor:
     def model(self) -> str:
         return self.customer_service.model
 
-    def answer(self, question: str, history: list[dict] | None = None) -> dict | None:
-        """调度专职智能体作答；不可用/失败返回 None，由调用方走本地兜底。"""
-        return self.customer_service.answer(question, history)
+    def answer(self, question: str, session_id: str = "default") -> dict | None:
+        """调度专职智能体作答；多轮记忆由 memory/ 的 checkpointer 按 session_id 托管。
+
+        不可用/失败返回 None，由调用方走本地兜底。
+        """
+        return self.customer_service.answer(question, session_id)
