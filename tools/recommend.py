@@ -25,7 +25,7 @@ def recommend_for(keywords: list[str]) -> list[dict]:
 
 
 def recommend_products(keywords: list[str]) -> str:
-    """根据用户需求关键词推荐合适商品。keywords：需求关键词列表，例如 ["耳机", "降噪"]。"""
+    """根据用户需求关键词推荐合适商品。调用格式 [recommend_products:keywords]，keywords：需求关键词列表，例如 ["耳机", "降噪"]。"""
     items = recommend_for(keywords)
     return json.dumps(
         [{"name": p["name"], "price": p["price"], "feature": p["feature"]} for p in items],

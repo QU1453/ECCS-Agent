@@ -25,7 +25,7 @@ def register_return(order_no: str, reason: str) -> dict:
 
 
 def handle_return(order_no: str, reason: str = "") -> str:
-    """办理退换货 / 退款：登记售后单并给出可选方案。order_no：订单号；reason：退货原因。"""
+    """办理退换货 / 退款：登记售后单并给出可选方案。调用格式 [handle_return:order_no,reason]，order_no：订单号；reason：退货原因。"""
     r = register_return(order_no, reason)
     return json.dumps(
         {

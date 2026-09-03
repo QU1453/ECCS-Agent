@@ -37,7 +37,7 @@ def lookup_order(order_no: str) -> dict | None:
 
 
 def query_order_info(order_no: str) -> str:
-    """查询订单基本信息：商品、金额、下单时间与当前状态。order_no：订单号字符串。"""
+    """查询订单基本信息：商品、金额、下单时间与当前状态。调用格式 [query_order_info:order_no]，order_no：订单号字符串。"""
     order = lookup_order(order_no)
     if order is None:
         return json.dumps({"found": False, "hint": "未查到该订单，请先核对订单号"}, ensure_ascii=False)
@@ -57,7 +57,7 @@ def query_order_info(order_no: str) -> str:
 
 
 def track_logistics(order_no: str) -> str:
-    """查询订单物流轨迹与预计送达时间。order_no：订单号字符串。"""
+    """查询订单物流轨迹与预计送达时间。调用格式 [track_logistics:order_no]，order_no：订单号字符串。"""
     order = lookup_order(order_no)
     if order is None:
         return json.dumps({"found": False, "hint": "未查到该订单的物流信息，请先核对订单号"}, ensure_ascii=False)
