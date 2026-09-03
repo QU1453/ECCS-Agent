@@ -53,6 +53,7 @@
 ├── Dockerfile        # 单服务镜像（Python 3.12 slim）
 ├── docker-compose.yml# 一键编排：端口 8623，Key 走环境变量注入
 ├── server.py         # FastAPI 后端入口：托管 ui + /api/ask
+├── config.py         # 智能体配置槽：API Key / 请求地址 / 模型 ID 统一入口
 ├── agents/           # 智能体目录（多智能体协作，一人一文件）
 │   ├── supervisor.py       # 主控智能体：统一入口，调度专职智能体
 │   └── customer_service.py # 客服智能体（LangGraph + 无 Key 本地兜底）
@@ -70,6 +71,31 @@
     ├── style.css     # 设计系统（暖纸 / 深墨 / 柿子橙）
     └── app.js        # 交互 + 内置演示路由（预留 /api/ask 桥接）
 ```
+
+## 智能体配置槽（API / 请求地址 / 模型 ID）
+
+所有智能体的 LLM 配置集中在 `config.py` 一个槽位，三个字段：
+
+| 槽位 | 变量 | 说明 | 示例 |
+| --- | --- | --- | --- |
+| API Key | `OPENAI_API_KEY` | 真实密钥，只放 `.env` / 环境变量，绝不入库 | `sk-...` |
+| 请求地址 | `OPENAI_BASE_URL` | OpenAI 官方留空；第三方 / 自部署（DeepSeek、通义、本地 vLLM 等）填 base_url | `https://api.deepseek.com/v1` |
+| 模型 ID | `OPENAI_MODEL` | OpenAI 兼容的模型名 | `gpt-4o-mini` / `deepseek-chat` |
+
+填写方式（二选一）：
+
+```bash
+# 方式 A：本地 .env（推荐；.env 已被 .gitignore 拦截）
+cp .env.example .env
+# 编辑 .env，取消注释并填三个槽位
+
+# 方式 B：环境变量（Docker / 云环境）
+export OPENAI_API_KEY=sk-xxx
+export OPENAI_BASE_URL=https://api.deepseek.com/v1
+export OPENAI_MODEL=deepseek-chat
+```
+
+约定：智能体文件（`agents/`）一律从 `config.py` 取值，不自行读环境变量——换模型 / 换服务商只改这一处；三个槽位全留空时自动走本地规则兜底，演示不断线。
 
 ## 本地运行
 
