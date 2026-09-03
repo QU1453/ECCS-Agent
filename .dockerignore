@@ -1,0 +1,26 @@
+# ===== 密钥 / 本地配置（绝不进入镜像与构建上下文）=====
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.token
+credentials*.json
+service-account*.json
+secret*.json
+
+# ===== 非运行所需 =====
+.git
+.gitignore
+__pycache__
+*.pyc
+venv/
+.venv/
+dist/
+build/
+logs/
+*.log
+.trae-html-share-packages
+.traecode

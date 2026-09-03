@@ -1,0 +1,16 @@
+# 一键启动：docker compose up -d --build
+# 密钥：把 OPENAI_API_KEY 写入宿主机 .env（已被 .gitignore / .dockerignore 拦截），
+#       经 compose 注入容器环境变量，不会写进镜像。留空则 Agent 走本地规则兜底。
+services:
+  agent:
+    build: .
+    image: eccs-agent:latest
+    container_name: eccs-agent
+    ports:
+      - "8623:8623"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      SERVER_HOST: 0.0.0.0
+    restart: unless-stopped

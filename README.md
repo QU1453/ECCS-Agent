@@ -33,6 +33,7 @@
 | 客服工具 | `tools.py`：订单查询 / 物流跟踪 / 退换货办理 / 商品推荐（演示数据） |
 | 界面 | 原生 HTML / CSS / JS（`ui/`，可直接独立预览） |
 | 兜底引擎 | 未配置 Key 时 `agent.py` 内置关键词路由，效果与前端演示一致 |
+| 容器化 | Docker + docker-compose（`Dockerfile` / `docker-compose.yml` / `.dockerignore`） |
 | 打包 | PyInstaller（onefile，规划中） |
 
 数据链路：`网页输入 → POST /api/ask → Agent 调用工具 → 返回 {reply, intent, data} → 前端渲染气泡/卡片`。
@@ -42,7 +43,10 @@
 ```
 大创一/
 ├── .gitignore        # 密钥 / 依赖 / 产物防护规则
+├── .dockerignore     # 密钥 / 非运行文件不进入镜像
 ├── README.md
+├── Dockerfile        # 单服务镜像（Python 3.12 slim）
+├── docker-compose.yml# 一键编排：端口 8623，Key 走环境变量注入
 ├── server.py         # FastAPI 后端入口：托管 ui + /api/ask
 ├── agent.py          # LangGraph 智能体 + 无 Key 本地兜底路由
 ├── tools.py          # 客服工具与演示数据（订单/物流/售后/推荐）
@@ -51,7 +55,7 @@
 └── ui/
     ├── index.html    # 对话窗口骨架
     ├── style.css     # 设计系统（暖纸 / 深墨 / 柿子橙）
-    └── app.js        # 交互 + 桥接 /api/ask + 卡片渲染
+    └── app.js        # 交互 + 内置演示路由（预留 /api/ask 桥接）
 ```
 
 ## 本地运行
@@ -71,6 +75,18 @@ python server.py
 python -m http.server 8623 --directory ui
 # 浏览器打开 http://localhost:8623/index.html
 ```
+
+方式三 · Docker 一键运行（环境与依赖全部封装在容器内）：
+
+```bash
+# 需要本机已安装 Docker / Docker Compose
+cp .env.example .env      # 可选：填入 OPENAI_API_KEY（不填走本地兜底）
+docker compose up -d --build
+# 浏览器打开 http://127.0.0.1:8623
+# 停止：docker compose down
+```
+
+> 镜像内**不烧录密钥**：`.dockerignore` 排除 `.env`，Key 由 compose 从宿主机 `.env` 注入环境变量；无 Key 时容器内 Agent 自动退回本地规则兜底。
 
 桌面窗口版（`main.py`，开发中）：
 
