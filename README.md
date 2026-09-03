@@ -17,22 +17,25 @@
 ## 功能特性
 
 - **单窗口对话界面**：顾客侧对话体验，AI 左、顾客右，输入中动画与时间戳
+- **Python Agent 后端**：FastAPI 提供 `/api/ask`，LangGraph 智能体接收网页输入并调用工具
 - **卡片式智能回复**：物流轨迹卡、商品推荐卡，信息一目了然
 - **快捷提问**：物流 / 退货 / 推荐等高频问题一键触发
-- **演示路由**：界面内置关键词意图匹配，无需后端即可演示完整对话链路
+- **双保险演示**：配置 `OPENAI_API_KEY` 走真实 LLM；未配置时自动退回本地规则引擎，演示不断线
 - **EXE 目标**：`pywebview`（WebView2）封装界面 → PyInstaller 打包单文件
 
 ## 技术架构
 
 | 层 | 方案 |
 | --- | --- |
-| 桌面容器 | Python + pywebview（Windows WebView2） |
+| 桌面容器 | Python + pywebview（Windows WebView2，开发中） |
+| 后端服务 | FastAPI + uvicorn（`server.py`，同一端口托管前端） |
+| 智能体 | LangGraph ReAct（`agent.py`）：LLM 自主决策 → 工具调用 → 回复生成 |
+| 客服工具 | `tools.py`：订单查询 / 物流跟踪 / 退换货办理 / 商品推荐（演示数据） |
 | 界面 | 原生 HTML / CSS / JS（`ui/`，可直接独立预览） |
-| 演示引擎 | 前端关键词意图路由（`app.js` → `window.askAgent`） |
-| 智能体（规划） | LLM 意图识别 → 工具调用（订单 / 售后）→ 知识库（RAG）→ 回复生成 |
-| 打包 | PyInstaller（onefile） |
+| 兜底引擎 | 未配置 Key 时 `agent.py` 内置关键词路由，效果与前端演示一致 |
+| 打包 | PyInstaller（onefile，规划中） |
 
-前后端通过 `window.askAgent(q)` 桥接：当前为前端模拟实现，接入 Python 后端时仅需注入真实实现，界面无需改动。
+数据链路：`网页输入 → POST /api/ask → Agent 调用工具 → 返回 {reply, intent, data} → 前端渲染气泡/卡片`。
 
 ## 目录结构
 
@@ -40,15 +43,29 @@
 大创一/
 ├── .gitignore        # 密钥 / 依赖 / 产物防护规则
 ├── README.md
+├── server.py         # FastAPI 后端入口：托管 ui + /api/ask
+├── agent.py          # LangGraph 智能体 + 无 Key 本地兜底路由
+├── tools.py          # 客服工具与演示数据（订单/物流/售后/推荐）
+├── requirements.txt  # Python 依赖
+├── .env.example      # 密钥配置样例（复制为 .env 后填写，不入库）
 └── ui/
     ├── index.html    # 对话窗口骨架
     ├── style.css     # 设计系统（暖纸 / 深墨 / 柿子橙）
-    └── app.js        # 交互 + 模拟 Agent 引擎 + pywebview 桥接点
+    └── app.js        # 交互 + 桥接 /api/ask + 卡片渲染
 ```
 
 ## 本地运行
 
-预览对话界面（无需任何依赖）：
+方式一 · 启动 Agent 后端（推荐，浏览器即全功能）：
+
+```bash
+pip install -r requirements.txt
+cp .env.example .env      # 填入 OPENAI_API_KEY（不填也能跑，走本地兜底）
+python server.py
+# 浏览器打开 http://127.0.0.1:8623
+```
+
+方式二 · 仅预览对话界面（无需任何依赖，走前端内置演示）：
 
 ```bash
 python -m http.server 8623 --directory ui
@@ -66,7 +83,8 @@ python main.py
 
 > 本项目仓库内**禁止出现任何 API Key / 密钥**。
 
-- 真实调用 LLM、订单 API 所需的密钥一律保存在本地 `.env`，由 `.gitignore` 拦截
+- 真实调用 LLM 所需的密钥一律保存在本地 `.env`（由 `.gitignore` 拦截），代码仅从环境变量读取
+- `.env.example` 只含占位符，可安全入库；**绝不把真实 `.env` 提交**
 - 每次 `git push` 前需核对暂存文件清单，确认无密钥类文件后再上传
 
 ## 协作约定（重要，团队须遵守）
@@ -77,7 +95,7 @@ python main.py
 
 ## Roadmap
 
-- [ ] Python 后端：LLM 意图路由 + 工具调用（订单查询 / 售后办理）
+- [x] Python Agent 后端：LangGraph LLM 意图 + 工具调用（订单 / 物流 / 售后 / 推荐）
 - [ ] 日本语客服（日语识别与回复、敬语风格）
 - [ ] 知识库 RAG：商品资料、日本物流时效、退换货与关税政策
 - [ ] pywebview 封装 + PyInstaller 打包单 EXE

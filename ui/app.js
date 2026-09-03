@@ -41,18 +41,31 @@ function showTyping() {
   return div;
 }
 
-/* 订单卡片 / 商品卡片 */
-const orderCard = () => `
-  <div class="card-title"><svg viewBox="0 0 24 24"><path d="M3 7h11v8H3zM14 10h4l3 3v2h-7z"/><circle cx="7" cy="17.4" r="1.6"/><circle cx="17.4" cy="17.4" r="1.6"/></svg>订单 2026081200012 · 顺丰速运</div>
+/* 演示订单（离线兜底渲染用，与后端 tools.py 数据一致） */
+const ORDER_DEMO = {
+  order_no: "2026081200012",
+  carrier: "顺丰速运",
+  paid_at: "昨天 15:02 付款",
+  qty: 1,
+  total: 299,
+  product: PRODUCTS.earbuds,
+  steps: [
+    { label: "已付款", state: "done" },
+    { label: "运输中", state: "cur" },
+    { label: "派送中", state: "" },
+    { label: "已签收", state: "" }
+  ]
+};
+
+/* 订单卡片 / 商品卡片（orderCard 兼容后端返回的 order 数据结构） */
+const orderCard = (o = ORDER_DEMO) => `
+  <div class="card-title"><svg viewBox="0 0 24 24"><path d="M3 7h11v8H3zM14 10h4l3 3v2h-7z"/><circle cx="7" cy="17.4" r="1.6"/><circle cx="17.4" cy="17.4" r="1.6"/></svg>订单 ${o.order_no} · ${o.carrier}</div>
   <div class="order-row">
-    <img src="${PRODUCTS.earbuds.img}" alt="商品">
-    <div><b>${PRODUCTS.earbuds.name}</b><div class="sub">¥299 × 1 · 昨天 15:02 付款</div></div>
+    <img src="${o.product.img}" alt="商品">
+    <div><b>${o.product.name}</b><div class="sub">¥${o.product.price} × ${o.qty} · ${o.paid_at}</div></div>
   </div>
   <div class="track">
-    <span class="tp done">已付款</span>
-    <span class="tp cur">运输中</span>
-    <span class="tp">派送中</span>
-    <span class="tp">已签收</span>
+    ${o.steps.map(s => `<span class="tp ${s.state}">${s.label}</span>`).join("")}
   </div>`;
 
 const recoCard = (items) => `
@@ -92,18 +105,42 @@ async function send() {
   $("#hint").textContent = "智能体思考中…";
 
   const local = answer(q);
-  const res = await window.askAgent(q);   // 真实版：pywebview js_api.ask(q)
-  const a = (res && res.reply) ? res : local; // 演示回退
+  const res = await window.askAgent(q);   // 真实版：POST /api/ask → Python Agent
+  const a = (res && res.reply) ? res : { reply: local.html, card: local.card }; // 后端不可达时回退本地演示
 
   await wait(DELAY());
   typing.remove();
-  addMsg("ai", a.reply, a.card);
-  $("#hint").textContent = "AI 智能体自动接待 · 平均耗时 1.5s";
+  const card = a.card || cardFrom(a.intent, a.data); // 卡片：离线直给 / 后端结构化渲染
+  addMsg("ai", a.reply, card);
+  $("#hint").textContent = (a.data || a.card) ? "智能体已回复（带卡片）" : "AI 智能体自动接待 · 平均耗时 1.5s";
   busy = false;
 }
 
-/* pywebview 注入点：window.askAgent 由 Python 提供（返回 {reply, card?}） */
-if (!window.askAgent) window.askAgent = async q => ({ reply: answer(q).html, card: answer(q).card });
+/* 把后端返回的 intent/data 渲染成卡片 HTML；无匹配返回空串 */
+function cardFrom(intent, data) {
+  if (!data) return "";
+  if (intent === "order") return orderCard(data);
+  if (intent === "recommend" && Array.isArray(data.items)) return recoCard(data.items);
+  return "";
+}
+
+/* 后端桥接：窗口输入 → Python Agent（FastAPI /api/ask），失败自动回退本地演示 */
+if (!window.askAgent) window.askAgent = async q => {
+  try {
+    const res = await fetch("/api/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: q, session_id: "demo" })
+    });
+    if (!res.ok) throw new Error("backend not ok");
+    const j = await res.json();
+    if (j && j.reply) return { reply: j.reply, intent: j.intent || "none", data: j.data || null };
+    throw new Error("empty reply");
+  } catch (e) {
+    const l = answer(q); // 纯静态预览（无后端）仍可演示
+    return { reply: l.html, card: l.card };
+  }
+};
 
 function escapeHTML(s) {
   return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
