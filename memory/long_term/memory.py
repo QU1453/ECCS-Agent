@@ -92,30 +92,36 @@ class LongTermMemory:
     # ---------- 内部 ----------
     @property
     def cache(self) -> EmbeddingCache:
+        """嵌入缓存（懒加载单例）：text_hash → 向量，同文本零重复计算。"""
         if self._cache is None:
             self._cache = EmbeddingCache(self._conn, self.provider)
         return self._cache
 
     def _stored_dim(self) -> int | None:
+        """读取 ann_meta 中已落盘的向量维度；未建过索引返回 None。"""
         row = self._conn.execute("SELECT value FROM ann_meta WHERE key='dim'").fetchone()
         return int(row[0]) if row else None
 
     def _set_meta(self, key: str, value: str) -> None:
+        """写 ann_meta 元数据（KV upsert），目前只存向量维度。"""
         self._conn.execute(
             "INSERT INTO ann_meta(key, value) VALUES(?,?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
         self._conn.commit()
 
     def _load_label_user(self) -> dict[int, str]:
+        """chunk_id → user_id 映射（从 chunks 表重建），供 ANN 检索时做用户分区过滤。"""
         return {int(cid): uid for cid, uid in self._conn.execute("SELECT id, user_id FROM chunks")}
 
     def _load_ann(self) -> AnnIndex | None:
+        """重启恢复：索引文件与维度元数据齐备则从磁盘加载 .hnsw，否则视为空索引。"""
         dim = self._stored_dim()
         if self.ann_path.exists() and dim:
             return AnnIndex.load(self.ann_path, dim, ef_search=self._efs, overfetch=self._ovf)
         return None
 
     def _ensure_ann(self, dim: int) -> AnnIndex:
+        """按需建索引；维度与既有索引不一致直接报错（换 Provider 需先清库）。"""
         stored = self._stored_dim()
         if stored is not None and stored != dim:
             raise ValueError(f"嵌入维度不一致：既有索引 {stored}，当前 Provider {dim}。请清空长期库或更换 Provider。")
@@ -129,6 +135,7 @@ class LongTermMemory:
 
     # ---------- 后端数据输入接口：结构化事实（精确 KV） ----------
     def save_fact(self, user_id: str, key: str, value, source: str = "backend") -> None:
+        """结构化事实 upsert（同 user 同 key 覆盖更新）：订单号 / 偏好 / 状态等。"""
         with self._wlock:
             self._conn.execute(
                 "INSERT INTO facts(user_id, key, value, source) VALUES(?,?,?,?) "
@@ -139,6 +146,7 @@ class LongTermMemory:
             self._conn.commit()
 
     def get_facts(self, user_id: str) -> list[dict]:
+        """取该用户全部事实，按更新时间升序；每条 {key, value, source, updated_at}。"""
         return [
             {"key": k, "value": v, "source": s, "updated_at": ts}
             for k, v, s, ts in self._conn.execute(
@@ -148,6 +156,7 @@ class LongTermMemory:
         ]
 
     def delete_fact(self, user_id: str, key: str) -> bool:
+        """删除一条事实；返回是否确实删除（key 不存在返回 False）。"""
         with self._wlock:
             cur = self._conn.execute("DELETE FROM facts WHERE user_id=? AND key=?", (str(user_id), key))
             self._conn.commit()
@@ -156,6 +165,7 @@ class LongTermMemory:
     # ---------- 后端数据输入接口：自由文本/文档（分块 → ANN 入库） ----------
     def add_document(self, user_id: str, text: str, title: str | None = None,
                      source: str = "backend") -> dict:
+        """长文本入库：分块 → 向量化 → chunks 落库 → ANN 入索引；返回 {doc_id, chunks}。"""
         text = (text or "").strip()
         if not text:
             raise ValueError("text 不能为空")
@@ -184,6 +194,7 @@ class LongTermMemory:
 
     # ---------- RAG 检索：ANN 速度优先 + 精确重排 ----------
     def recall(self, user_id: str, query: str, top_k: int = 5, with_rerank: bool = True) -> list[dict]:
+        """语义召回：查询向量化 → ANN 粗排（仅本用户分区）→ 精确 cosine 重排 → top-k 块。"""
         if self._ann is None or len(self._ann) == 0:
             return []
         uid = str(user_id)
@@ -242,6 +253,7 @@ class LongTermMemory:
 
     # ---------- 统计 / 维护 ----------
     def count(self, user_id: str | None = None) -> dict:
+        """统计文档与分块数；传 user_id 只统计该用户。"""
         if user_id is None:
             docs = self._conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
             chs = self._conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
@@ -253,6 +265,7 @@ class LongTermMemory:
         return {"documents": docs, "chunks": chs}
 
     def clear(self, user_id: str | None = None) -> None:
+        """清空记忆：不传 user_id 全清（含索引与缓存重建）；传则只删该用户数据并软删其索引项。"""
         with self._wlock:
             if user_id is None:  # 全清：重建空索引
                 for table in ("facts", "chunks", "documents", "embed_cache", "ann_meta"):
@@ -278,10 +291,12 @@ class LongTermMemory:
                     self._label_user.pop(lb, None)
 
     def save(self) -> None:
+        """手动持久化 ANN 索引到磁盘（auto_save=True 时无需调用）。"""
         if self._ann is not None:
             self._ann.save(self.ann_path)
 
     def close(self) -> None:
+        """关闭连接；auto_save 开启时先落盘索引再关。"""
         try:
             if self.auto_save:
                 self.save()

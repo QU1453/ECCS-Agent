@@ -16,6 +16,7 @@ _SENT_SPLIT = re.compile(r"(?<=[。！？!?；;\n])")
 
 
 def estimate_tokens(text: str) -> int:
+    """粗估 token 数：CJK（含假名/全角）按 1、拉丁按 0.25 计，分块粒度够用。"""
     cjk = sum(
         1 for c in text
         if "\u2e80" <= c <= "\u9fff" or "\u3040" <= c <= "\u30ff" or "\uff00" <= c <= "\uffef"
@@ -24,12 +25,14 @@ def estimate_tokens(text: str) -> int:
 
 
 def _sentences(text: str) -> list[str]:
+    """按段落 / 句末标点（。！？!?；;）切句，保持语义单元完整。"""
     text = text.replace("\r", "")
     parts = [p.strip() for p in _SENT_SPLIT.split(text) if p and p.strip()]
     return parts if parts else ([text.strip()] if text.strip() else [])
 
 
 def _hard_split(s: str, max_tokens: int, overlap: int, min_tokens: int) -> list[str]:
+    """超长单句兜底：按字符窗口硬切（CJK 1 字≈1 token），带步进重叠。"""
     win, step = max_tokens, max(1, max_tokens - overlap)
     out = [s[i:i + win] for i in range(0, len(s), step)]
     if len(out) > 1 and estimate_tokens(out[-1]) < min_tokens:  # 尾部过短并入前块

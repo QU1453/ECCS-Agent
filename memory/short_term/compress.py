@@ -13,6 +13,7 @@ _ROLE_CN = {"human": "用户", "ai": "客服", "system": "系统", "tool": "工�
 
 
 def _content_text(content) -> str:
+    """消息 content 统一转文本（兼容 str / content blocks 列表两种形态）。"""
     if isinstance(content, str):
         return content
     if isinstance(content, list):  # 兼容 content blocks
@@ -33,6 +34,7 @@ class Compressor:
         return self.llm is not None
 
     def needs_compress(self, msg_count: int) -> bool:
+        """消息数超过阈值时返回 True（阈值自动抬升到 keep_recent+1 以上）。"""
         return msg_count > self.compress_threshold
 
     def summarize(self, msgs: list[BaseMessage], previous_summary: str = "") -> str:

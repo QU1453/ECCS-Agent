@@ -30,6 +30,7 @@ _ROLE_MAP = {"human": "user", "ai": "assistant", "system": "system", "tool": "to
 
 
 def _to_message(role: str, content: str) -> BaseMessage:
+    """角色字符串 → LangChain 消息对象（user/assistant/system，未知按 user）。"""
     role = (role or "user").lower()
     cls = {"user": HumanMessage, "assistant": AIMessage, "system": SystemMessage}.get(role, HumanMessage)
     return cls(content)
@@ -92,6 +93,7 @@ class ShortTermMemory:
 
     # ---------- 读 ----------
     def get_messages(self, session_id: str) -> list[BaseMessage]:
+        """读该会话 checkpoint 内的全部消息（含回流的摘要 SystemMessage）。"""
         state = self._writer.get_state(self.chat_config(session_id))
         return [m for m in ((state.values or {}).get("messages") or []) if isinstance(m, BaseMessage)]
 
@@ -111,9 +113,11 @@ class ShortTermMemory:
         return out
 
     def count_messages(self, session_id: str) -> int:
+        """当前会话消息条数（压缩阈值判断用）。"""
         return len(self.get_messages(session_id))
 
     def get_summary(self, session_id: str) -> str:
+        """读该会话的滚动摘要；未压缩过返回空串。"""
         row = self._conn.execute(
             "SELECT summary FROM summaries WHERE thread_id=?", (str(session_id),)
         ).fetchone()
@@ -174,6 +178,7 @@ class ShortTermMemory:
         self._conn.commit()
 
     def close(self) -> None:
+        """关闭 SQLite 连接（checkpointer 随连接失效）。"""
         try:
             self._conn.close()
         except Exception:

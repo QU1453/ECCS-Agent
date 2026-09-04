@@ -87,9 +87,11 @@ class MemoryManager:
         self.long_term.save_fact(user_id, key, value, source=source)
 
     def get_facts(self, user_id: str) -> list[dict]:
+        """取用户全部结构化事实 [{key, value, source, updated_at}]。"""
         return self.long_term.get_facts(user_id)
 
     def delete_fact(self, user_id: str, key: str) -> bool:
+        """删除一条事实；key 不存在返回 False。"""
         return self.long_term.delete_fact(user_id, key)
 
     def add_document(self, user_id: str, text: str, title: str | None = None,
@@ -115,11 +117,13 @@ class MemoryManager:
         }
 
     def clear(self, session_id: str | None = None, user_id: str | None = None) -> None:
+        """清除记忆：session_id 清短期会话，user_id 清长期记忆；都不传则无操作。"""
         if session_id:
             self.short_term.clear(session_id)
         if user_id:
             self.long_term.clear(user_id)
 
     def close(self) -> None:
+        """关闭短期 / 长期存储连接（auto_save 时长期索引先落盘）。"""
         self.short_term.close()
         self.long_term.close()

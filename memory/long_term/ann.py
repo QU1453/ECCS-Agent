@@ -17,11 +17,13 @@ import hnswlib
 
 
 def l2_normalize(vec: list[float]) -> list[float]:
+    """L2 归一化（零向量防除零）；归一化后内积即 cosine 相似度。"""
     norm = math.sqrt(sum(x * x for x in vec)) or 1.0
     return [x / norm for x in vec]
 
 
 def cosine(a: list[float], b: list[float]) -> float:
+    """精确 cosine 相似度（重排阶段用；不要求输入已归一化）。"""
     num = sum(x * y for x, y in zip(a, b))
     na = math.sqrt(sum(x * x for x in a)) or 1.0
     nb = math.sqrt(sum(y * y for y in b)) or 1.0
@@ -54,6 +56,7 @@ class AnnIndex:
 
     # ---------- 写 ----------
     def add(self, labels: list[int], vectors: list[list[float]]) -> None:
+        """批量写入（label=chunk_id，向量自动归一化）；容量不足自动翻倍扩容。"""
         if not labels:
             return
         vecs = [l2_normalize(v) for v in vectors]
@@ -67,6 +70,7 @@ class AnnIndex:
             self._index.add_items(vecs, [int(x) for x in labels])
 
     def mark_deleted(self, label: int) -> None:
+        """软删除一个 label（HNSW 不物理删除；label 不存在时静默忽略）。"""
         with self._lock:
             try:
                 self._index.mark_deleted(int(label))
@@ -98,10 +102,12 @@ class AnnIndex:
             ]
 
     def __len__(self) -> int:
+        """索引中的元素总数（含软删除项）。"""
         return self._index.get_current_count()
 
     # ---------- 持久化 ----------
     def save(self, path: str | Path) -> None:
+        """索引序列化到 .hnsw 文件（自动建父目录）。"""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock:
@@ -109,6 +115,7 @@ class AnnIndex:
 
     @classmethod
     def load(cls, path: str | Path, dim: int, ef_search: int = 64, overfetch: int = 50) -> "AnnIndex":
+        """从 .hnsw 文件恢复索引（绕过 __init__，HNSW 建图参数已在文件内）。"""
         obj = cls.__new__(cls)
         obj.dim = dim
         obj.space = "cosine"

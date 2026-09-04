@@ -21,14 +21,17 @@ _TOKEN_RE = re.compile(r"[a-zA-Z0-9]+|[\u2e80-\u9fff\u3040-\u30ff]")
 
 
 def text_hash(text: str) -> str:
+    """文本内容指纹（SHA-256）：嵌入缓存的 key，同文本只算一次向量。"""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def vec_to_blob(vec: list[float]) -> bytes:
+    """float 向量 → SQLite BLOB（float32 数组字节）。"""
     return array("f", vec).tobytes()
 
 
 def blob_to_vec(blob: bytes) -> list[float]:
+    """SQLite BLOB → float 向量（vec_to_blob 的逆操作）。"""
     arr = array("f")
     arr.frombytes(blob)
     return list(arr)
@@ -56,6 +59,7 @@ class HashEmbeddingProvider(EmbeddingProvider):
         return self._dim
 
     def embed(self, texts: list[str]) -> list[list[float]]:
+        """词袋哈希向量（token → 桶计数 → L2 归一化）；确定性、零网络依赖。"""
         out = []
         for t in texts:
             v = [0.0] * self._dim
@@ -82,11 +86,13 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
 
     @property
     def dim(self) -> int:
+        """向量维度（首次访问时用一条探测文本实测并缓存）。"""
         if self._dim is None:
             self._dim = len(self.embed(["dim probe"])[0])
         return self._dim
 
     def embed(self, texts: list[str]) -> list[list[float]]:
+        """批量文本 → 向量（OpenAI 兼容 embedding 接口）。"""
         return self._client.embed_documents(list(texts))
 
 
@@ -115,9 +121,11 @@ class EmbeddingCache:
 
     @property
     def dim(self) -> int:
+        """当前维度：缓存表已有记录用缓存值，否则取 Provider 实测值。"""
         return self._dim if self._dim is not None else self.provider.dim
 
     def embed(self, texts: list[str]) -> list[list[float]]:
+        """批量嵌入（读缓存 → 只对未命中文本调 Provider → 回填缓存）。"""
         if not texts:
             return []
         hashes = [text_hash(t) for t in texts]
@@ -148,5 +156,6 @@ class EmbeddingCache:
         return [found[h] for h in hashes]
 
     def get_by_hash(self, h: str) -> list[float] | None:
+        """按文本指纹取向量（重排阶段用）；无缓存返回 None。"""
         row = self._conn.execute("SELECT vector FROM embed_cache WHERE text_hash=?", (h,)).fetchone()
         return blob_to_vec(row[0]) if row else None

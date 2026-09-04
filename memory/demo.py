@@ -51,6 +51,7 @@ DOC = (
 
 
 def main() -> int:
+    """跑通四个场景并断言：会话隔离+压缩 → facts/文档入库 → ANN 召回对齐 → 重启持久化。"""
     base = Path(__file__).resolve().parent / "demo_data"
     shutil.rmtree(base, ignore_errors=True)  # 每次全新演示
     mm = MemoryManager(base, compress_threshold=THRESHOLD, keep_recent=KEEP_RECENT, llm=None)
