@@ -1,39 +1,111 @@
 # -*- coding: utf-8 -*-
-"""订单 / 物流工具：查询订单信息与物流轨迹（演示数据，真实版对接订单与物流 API）。"""
+"""订单 / 物流工具：查询订单信息与物流轨迹（数据源：data/shop.db，真实版对接订单与物流 API）。"""
 from __future__ import annotations
 
 import json
 
-from .catalog import PRODUCTS
+from .catalog import get_product
+from .db import STATUS_SCENE, STATUS_TEXT, get_conn, order_steps
 
-# ---- 演示订单（步骤 state：done=已完成 / cur=进行中 / ""=未到）------------------
-ORDERS = {
-    "2026081200012": {
-        "order_no": "2026081200012",
-        "product_code": "earbuds",
-        "qty": 1,
-        "total": 299,
-        "paid_at": "昨天 15:02 付款",
-        "carrier": "顺丰速运",
-        "status": "transporting",  # paid / transporting / delivering / done
-        "location": "广州转运中心",
-        "eta": "明天 18:00 前送达",
-        "steps": [
-            {"label": "已付款", "state": "done"},
-            {"label": "运输中", "state": "cur"},
-            {"label": "派送中", "state": ""},
-            {"label": "已签收", "state": ""},
-        ],
-    }
-}
+
+def _gen_order_no() -> str:
+    """生成新订单号：YYYYMMDD + 5 位当日序号（如 2026090400001）。"""
+    from datetime import datetime
+
+    conn = get_conn()
+    try:
+        date_prefix = datetime.now().strftime("%Y%m%d")
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM orders WHERE order_no LIKE ?", (f"{date_prefix}%",)
+        ).fetchone()
+        return f"{date_prefix}{row['n'] + 1:05d}"
+    finally:
+        conn.close()
 
 
 def lookup_order(order_no: str) -> dict | None:
-    """按订单号查订单，不存在返回 None。"""
-    order = ORDERS.get(str(order_no).strip())
+    """按订单号查订单（实时查库），不存在返回 None。返回结构与原演示版一致。"""
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM orders WHERE order_no = ?", (str(order_no).strip(),)
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    order = dict(row)
+    product = get_product(order["product_code"])
+    if product is None:
+        return None
+    order["product"] = product
+    order["location"], order["eta"] = STATUS_SCENE.get(order["status"], ("", ""))
+    order["steps"] = order_steps(order["status"])
+    return order
+
+
+def create_order(product_code: str, qty: int = 1, carrier: str = "顺丰速运") -> dict:
+    """新建订单（admin.py 录单用）：状态 paid，自动算总价与订单号。供录单工具调用。"""
+    product = get_product(product_code)
+    if product is None:
+        raise ValueError(f"商品编码不存在：{product_code}")
+    order_no = _gen_order_no()
+    from datetime import datetime
+
+    conn = get_conn()
+    try:
+        conn.execute(
+            "INSERT INTO orders(order_no, product_code, qty, total, paid_at, status, carrier)"
+            " VALUES(?,?,?,?,?,?,?)",
+            (
+                order_no,
+                product_code,
+                qty,
+                round(product["price"] * qty, 2),
+                f"今天 {datetime.now().strftime('%H:%M')} 付款",
+                "paid",
+                carrier,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return lookup_order(order_no)
+
+
+def advance_order(order_no: str) -> dict | None:
+    """推进订单到下一状态（paid→transporting→delivering→done，admin.py 用）。"""
+    from .db import STATUS_FLOW
+
+    order = lookup_order(order_no)
     if order is None:
         return None
-    return {**order, "product": PRODUCTS[order["product_code"]]}
+    idx = STATUS_FLOW.index(order["status"])
+    if idx >= len(STATUS_FLOW) - 1:
+        return order  # 已签收，不能再推进
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE orders SET status = ? WHERE order_no = ?",
+            (STATUS_FLOW[idx + 1], str(order_no).strip()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return lookup_order(order_no)
+
+
+def list_orders() -> list[dict]:
+    """全部订单（admin.py 列表用，按下单时间倒序）。"""
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT order_no, product_code, qty, total, paid_at, status, carrier"
+            " FROM orders ORDER BY created_at DESC, order_no DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
 
 
 def query_order_info(order_no: str) -> str:
@@ -59,7 +131,7 @@ def query_order_info(order_no: str) -> str:
             "qty": order["qty"],
             "total": order["total"],
             "paid_at": order["paid_at"],
-            "status": {"paid": "已付款", "transporting": "运输中", "delivering": "派送中", "done": "已签收"}.get(order["status"], order["status"]),
+            "status": STATUS_TEXT.get(order["status"], order["status"]),
         },
         ensure_ascii=False,
     )

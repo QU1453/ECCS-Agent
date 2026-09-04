@@ -13,6 +13,8 @@ services:
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
-      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       SERVER_HOST: 0.0.0.0
+    volumes:
+      - ./data:/app/data   # SQLite 数据源落盘：容器重建订单/售后不丢；宿主机可跑 admin.py 录单
     restart: unless-stopped

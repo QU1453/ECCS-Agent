@@ -1,21 +1,31 @@
 # -*- coding: utf-8 -*-
-"""售后工具：退换货 / 退款受理登记（演示数据，真实版对接售后工单系统）。"""
+"""售后工具：退换货 / 退款受理登记（数据源：data/shop.db，真实版对接售后工单系统）。"""
 from __future__ import annotations
 
 import json
 
+from .db import get_conn
 from .order import lookup_order
 
-_REFUND_SEQ = [2033]  # 售后单号自增，演示用
+# 售后单号口径：#SA-{id + 2032}，与原演示序列（首单 #SA-2034）衔接
+_SEQ_OFFSET = 2032
 
 
 def register_return(order_no: str, reason: str) -> dict:
-    """登记售后单，返回受理信息（演示）。"""
-    n = _REFUND_SEQ[-1] + 1
-    _REFUND_SEQ.append(n)
+    """登记售后单：落库持久化（重启不丢），返回受理信息。"""
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "INSERT INTO after_sales(order_no, reason) VALUES(?,?)",
+            (str(order_no).strip(), reason or "未填写"),
+        )
+        conn.commit()
+        receipt_id = cur.lastrowid
+    finally:
+        conn.close()
     order = lookup_order(order_no)
     return {
-        "receipt": f"#SA-{n}",
+        "receipt": f"#SA-{receipt_id + _SEQ_OFFSET}",
         "order_no": str(order_no).strip(),
         "product_name": order["product"]["name"] if order else None,
         "refund_amount": order["total"] if order else None,

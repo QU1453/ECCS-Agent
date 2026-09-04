@@ -65,6 +65,7 @@ checkpoints/
 *.db
 *.sqlite
 *.sqlite3
+data/          # SQLite 数据源（商品/订单/售后），本地生成不入库
 
 # ===== Memory 模块运行时数据（checkpoint / 向量索引，不入库）=====
 memory/*/data/
