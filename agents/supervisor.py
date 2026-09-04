@@ -19,12 +19,18 @@ from config import MODEL_ID
 from .customer_service import CustomerServiceAgent, classic_reply
 from .presales import PreSalesAgent
 
-# 售前导购的路由关键词：命中即分流给 presales
+# 售前导购的路由关键词（中日双语）：命中即分流给 presales
 # 注意：订单 / 物流 / 售后关键词要放在客服路由里优先判断（见 _route），
 # 避免"订单多少钱""商品什么时候发货"这类混合问句被误分给导购
-_PRE_SALES_PATTERN = re.compile(r"推荐|想买|哪款|什么好|好物|比价|耳机|键盘|保温杯|充电宝")
-# 客服关键词优先级更高：含订单 / 物流 / 售后语义时一律先走客服
-_CS_PATTERN = re.compile(r"物流|快递|到哪|发货|订单|单号|签收|退|换|退款|售后|质量|坏了")
+_PRE_SALES_PATTERN = re.compile(
+    r"推荐|想买|哪款|什么好|好物|比价|耳机|键盘|保温杯|充电宝"
+    r"|おすすめ|推薦|薦め|どれ|いくら|価格|値段|商品案内|イヤホン|ヘッドホン|キーボード|マグボトル|水筒|バッテリー"
+)
+# 客服关键词优先级更高（中日双语）：含订单 / 物流 / 售后语义时一律先走客服
+_CS_PATTERN = re.compile(
+    r"物流|快递|到哪|发货|订单|单号|签收|退|换|退款|售后|质量|坏了"
+    r"|配送|荷物|注文|追跡|届く|返品|交換|返金|キャンセル|不良"
+)
 
 
 class Supervisor:
