@@ -115,7 +115,7 @@ def main() -> int:
     mm2.close()
 
     print("=" * 64)
-    print("DEMO ALL PASS ✓（数据目录：Memory/demo_data，可删除）")
+    print("DEMO ALL PASS ✓（数据目录：memory/demo_data，可删除）")
     return 0
 
 

@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""短期记忆：LangGraph SqliteSaver（thread_id=会话ID，万人即万 thread，互不串扰）。
+"""短期记忆：LangGraph SqliteSaver（thread_id="session:{会话ID}"，万人即万 thread，互不串扰）。
 
 接入方式（不改本模块）：
 
-    from Memory import MemoryManager
+    from memory import MemoryManager
     mm = MemoryManager()
     graph = create_react_agent(..., checkpointer=mm.short_term.saver)
     result = graph.invoke({"messages": [...]}, mm.chat_config(session_id))
@@ -30,6 +30,11 @@ def _to_message(role: str, content: str) -> BaseMessage:
     role = (role or "user").lower()
     cls = {"user": HumanMessage, "assistant": AIMessage, "system": SystemMessage}.get(role, HumanMessage)
     return cls(content)
+
+
+def thread_id_for(session_id: str) -> str:
+    """会话 ID → checkpointer 线程命名空间（兼容原 memory/short_term.py 的 "session:" 前缀）。"""
+    return f"session:{session_id}"
 
 
 class ShortTermMemory:
@@ -66,8 +71,8 @@ class ShortTermMemory:
         return self._saver
 
     def chat_config(self, session_id: str) -> dict:
-        """LangGraph 调用配置：thread_id=会话ID，一人一会话一线程。"""
-        return {"configurable": {"thread_id": str(session_id)}}
+        """LangGraph 调用配置：thread_id="session:{会话ID}"，一人一会话一线程。"""
+        return {"configurable": {"thread_id": thread_id_for(session_id)}}
 
     # ---------- LLM 输入接口 ----------
     def add_message(self, session_id: str, role: str, content: str) -> None:
