@@ -19,7 +19,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -40,13 +40,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 同一端口托管前端页面
+# 同一端口托管前端页面：/ui 前缀与根路径均可访问
 app.mount("/ui", StaticFiles(directory=BASE_DIR / "ui"), name="ui")
-
-
-@app.get("/")
-async def index() -> FileResponse:
-    return FileResponse(BASE_DIR / "ui" / "index.html")
 
 
 class AskRequest(BaseModel):
@@ -125,6 +120,11 @@ async def clear(req: ClearRequest) -> dict:
     if not sid:
         return JSONResponse({"error": "session_id 不能为空"}, status_code=400)
     return {"ok": True, "cleared": service.clear_session(sid)}
+
+
+# 根路径挂载静态页（必须放在所有 API 路由之后，避免吞掉 /api/*）：
+# html=True 使 "/" 自动返回 index.html；style.css / app.js 等相对引用同源生效
+app.mount("/", StaticFiles(directory=BASE_DIR / "ui", html=True), name="root")
 
 
 if __name__ == "__main__":

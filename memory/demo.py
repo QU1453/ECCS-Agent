@@ -3,7 +3,8 @@
 
 覆盖：LLM 输入接口（LangGraph checkpointer + 压缩）、后端数据输入接口（facts + 文档分块）、
 ANN-RAG 召回（速度 + 准确率对照）、跨实例持久化、build_context 四段组装。
-无 OPENAI_API_KEY 时嵌入走 Hash 降级、压缩走纯裁剪降级（均有断言）。
+一键离线演示：嵌入固定走 Hash（自包含，不受 .env 密钥影响）；
+压缩 llm=None 走纯裁剪降级（均有断言）。
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ from pathlib import Path
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, MessagesState, START, StateGraph
 
+from .long_term.rag import HashEmbeddingProvider
 from .manager import MemoryManager
 
 THRESHOLD, KEEP_RECENT = 30, 10
@@ -54,7 +56,8 @@ def main() -> int:
     """跑通四个场景并断言：会话隔离+压缩 → facts/文档入库 → ANN 召回对齐 → 重启持久化。"""
     base = Path(__file__).resolve().parent / "demo_data"
     shutil.rmtree(base, ignore_errors=True)  # 每次全新演示
-    mm = MemoryManager(base, compress_threshold=THRESHOLD, keep_recent=KEEP_RECENT, llm=None)
+    mm = MemoryManager(base, compress_threshold=THRESHOLD, keep_recent=KEEP_RECENT, llm=None,
+                       embedding_provider=HashEmbeddingProvider())
 
     print("=" * 64)
     print("[1] LLM 输入接口：LangGraph checkpointer + 会话隔离 + 记忆压缩")
@@ -103,7 +106,8 @@ def main() -> int:
 
     print("[4] 跨实例持久化（SQLite 落盘 + .hnsw 索引重载）")
     mm.close()
-    mm2 = MemoryManager(base, compress_threshold=THRESHOLD, keep_recent=KEEP_RECENT, llm=None)
+    mm2 = MemoryManager(base, compress_threshold=THRESHOLD, keep_recent=KEEP_RECENT, llm=None,
+                        embedding_provider=HashEmbeddingProvider())
     assert len(mm2.get_history("session-A")) == KEEP_RECENT
     assert len(mm2.get_facts("user-1")) == 2
     hits2 = mm2.recall("user-1", q, top_k=5)
