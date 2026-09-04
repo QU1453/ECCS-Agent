@@ -65,3 +65,12 @@ checkpoints/
 *.db
 *.sqlite
 *.sqlite3
+
+# ===== Memory 模块运行时数据（checkpoint / 向量索引，不入库）=====
+memory/*/data/
+memory/demo_data/
+.tmp/
+
+# ===== 单元测试（仅本地运行，不入库）=====
+tests/
+pytest.ini
