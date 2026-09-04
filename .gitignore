@@ -70,3 +70,7 @@ checkpoints/
 memory/*/data/
 memory/demo_data/
 .tmp/
+
+# ===== 单元测试（仅本地运行，不入库）=====
+tests/
+pytest.ini

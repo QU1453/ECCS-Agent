@@ -142,7 +142,8 @@ class ShortTermMemory:
 
     # ---------- 维护 ----------
     def clear(self, session_id: str) -> None:
-        self._saver.delete_thread(str(session_id))
+        # thread_id 带命名空间前缀（与 chat_config 一致），否则删不到 checkpoint
+        self._saver.delete_thread(thread_id_for(session_id))
         self._conn.execute("DELETE FROM summaries WHERE thread_id=?", (str(session_id),))
         self._conn.commit()
 
