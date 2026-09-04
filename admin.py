@@ -16,7 +16,7 @@ from __future__ import annotations
 import sys
 from urllib.parse import quote
 
-from tools import advance_order, create_order, list_orders, lookup_order
+from tools import advance_order, create_order, list_orders, lookup_order, pay_order
 from tools.catalog import get_products
 from tools.db import STATUS_TEXT, init_db
 
@@ -41,9 +41,10 @@ def cmd_list() -> None:
 
 
 def cmd_add(product_code: str, qty: int) -> None:
-    """录单：校验商品存在 → create_order → 打印订单号与信息。"""
+    """录单：校验商品存在 → create_order（未付款）→ 自动标记已付款 → 打印订单号。"""
     try:
         order = create_order(product_code, qty=qty)
+        order = pay_order(order["order_no"])  # 录单口径 = 已付款成交
     except ValueError as exc:
         print(f"录单失败：{exc}")
         print(f"当前可用商品编码：{', '.join(get_products())}")

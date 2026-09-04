@@ -16,7 +16,7 @@ DB_PATH = BASE_DIR / "data" / "shop.db"
 
 # 订单状态 → 轨迹展示的固定流转（真实版替换为物流 API 回调节点）
 STATUS_FLOW = ["paid", "transporting", "delivering", "done"]
-STATUS_TEXT = {"paid": "已付款", "transporting": "运输中", "delivering": "派送中", "done": "已签收"}
+STATUS_TEXT = {"unpaid": "未付款", "paid": "已付款", "transporting": "运输中", "delivering": "派送中", "done": "已签收"}
 # 每个状态对应的当前位置 / 预计送达（演示口径，真实版来自物流 API）
 STATUS_SCENE = {
     "paid": ("卖家已打包", "预计 48 小时内发货"),
@@ -111,7 +111,9 @@ def _seed_if_empty(conn: sqlite3.Connection) -> None:
 
 
 def order_steps(status: str) -> list[dict]:
-    """按当前状态生成四段轨迹（done=已完成 / cur=进行中 / 空=未到）。"""
+    """按当前状态生成四段轨迹（done=已完成 / cur=进行中 / 空=未到）；未付款时全部未到。"""
+    if status == "unpaid":
+        return [{"label": STATUS_TEXT[st], "state": ""} for st in STATUS_FLOW]
     idx = STATUS_FLOW.index(status) if status in STATUS_FLOW else 0
     return [
         {"label": STATUS_TEXT[st], "state": "done" if i < idx else ("cur" if i == idx else "")}

@@ -11,6 +11,7 @@ from .order import (
     create_order,
     list_orders,
     lookup_order,
+    pay_order,
     query_order_info,
     track_logistics,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "get_products",
     "lookup_order",
     "create_order",
+    "pay_order",
     "advance_order",
     "list_orders",
     "query_order_info",

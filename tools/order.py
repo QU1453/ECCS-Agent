@@ -45,27 +45,38 @@ def lookup_order(order_no: str) -> dict | None:
 
 
 def create_order(product_code: str, qty: int = 1, carrier: str = "顺丰速运") -> dict:
-    """新建订单（admin.py 录单用）：状态 paid，自动算总价与订单号。供录单工具调用。"""
+    """新建订单（商城下单 / admin 录单用）：初始为未付款，自动算总价与订单号。"""
     product = get_product(product_code)
     if product is None:
         raise ValueError(f"商品编码不存在：{product_code}")
     order_no = _gen_order_no()
-    from datetime import datetime
-
     conn = get_conn()
     try:
         conn.execute(
             "INSERT INTO orders(order_no, product_code, qty, total, paid_at, status, carrier)"
             " VALUES(?,?,?,?,?,?,?)",
-            (
-                order_no,
-                product_code,
-                qty,
-                round(product["price"] * qty, 2),
-                f"今天 {datetime.now().strftime('%H:%M')} 付款",
-                "paid",
-                carrier,
-            ),
+            (order_no, product_code, qty, round(product["price"] * qty, 2), "", "unpaid", carrier),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return lookup_order(order_no)
+
+
+def pay_order(order_no: str) -> dict | None:
+    """模拟支付：unpaid → paid，写入付款时间（真实版替换为支付网关回调）。"""
+    from datetime import datetime
+
+    order = lookup_order(order_no)
+    if order is None:
+        return None
+    if order["status"] != "unpaid":
+        return order  # 已支付/已流转的订单原样返回（幂等）
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE orders SET status = 'paid', paid_at = ? WHERE order_no = ?",
+            (f"今天 {datetime.now().strftime('%H:%M')} 付款", str(order_no).strip()),
         )
         conn.commit()
     finally:
@@ -74,21 +85,36 @@ def create_order(product_code: str, qty: int = 1, carrier: str = "顺丰速运")
 
 
 def advance_order(order_no: str) -> dict | None:
-    """推进订单到下一状态（paid→transporting→delivering→done，admin.py 用）。"""
+    """推进订单到下一状态（unpaid→paid→transporting→delivering→done，admin.py 用）。"""
     from .db import STATUS_FLOW
 
     order = lookup_order(order_no)
     if order is None:
         return None
-    idx = STATUS_FLOW.index(order["status"])
-    if idx >= len(STATUS_FLOW) - 1:
-        return order  # 已签收，不能再推进
+    cur = order["status"]
+    if cur == "unpaid":
+        nxt = "paid"  # 未付款订单先推进为已付款
+    elif cur in STATUS_FLOW:
+        idx = STATUS_FLOW.index(cur)
+        if idx >= len(STATUS_FLOW) - 1:
+            return order  # 已签收，不能再推进
+        nxt = STATUS_FLOW[idx + 1]
+    else:
+        return order
     conn = get_conn()
     try:
-        conn.execute(
-            "UPDATE orders SET status = ? WHERE order_no = ?",
-            (STATUS_FLOW[idx + 1], str(order_no).strip()),
-        )
+        if nxt == "paid" and not order.get("paid_at"):
+            from datetime import datetime
+
+            conn.execute(
+                "UPDATE orders SET status = ?, paid_at = ? WHERE order_no = ?",
+                (nxt, f"今天 {datetime.now().strftime('%H:%M')} 付款", str(order_no).strip()),
+            )
+        else:
+            conn.execute(
+                "UPDATE orders SET status = ? WHERE order_no = ?",
+                (nxt, str(order_no).strip()),
+            )
         conn.commit()
     finally:
         conn.close()

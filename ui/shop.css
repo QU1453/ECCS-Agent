@@ -1,0 +1,70 @@
+/* ===== ECCS 商城（demo 最小闭环）——延续对话页的和纸/暖纸设计系统 ===== */
+
+.shop { max-width: 960px; margin: 0 auto; padding: 96px 20px 60px; }
+
+.shop-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 28px; }
+.shop-head h1 { margin: 0; font-size: 30px; font-weight: 900; color: var(--ink, #2b2320); }
+.shop-head p { margin: 4px 0 0; color: #8a7f76; font-size: 13px; }
+.shop-head .back { font-size: 13px; color: #b3552e; text-decoration: none; white-space: nowrap; }
+.shop-head .back:hover { text-decoration: underline; }
+
+/* 货架网格 */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 16px; }
+.prod { background: #fffdf9; border: 1px solid #eadfcc; border-radius: 14px; overflow: hidden;
+        display: flex; flex-direction: column; transition: transform .15s, box-shadow .15s; }
+.prod:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(90, 70, 50, .12); }
+.prod img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+.prod .p-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.prod .p-name { font-weight: 700; font-size: 14px; color: #2b2320; }
+.prod .p-feature { font-size: 12px; color: #8a7f76; flex: 1; }
+.prod .p-row { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
+.prod .p-price { color: #c1502e; font-weight: 700; }
+.prod .p-price small { font-size: 11px; }
+
+/* 我的订单 */
+.myorder { margin-top: 40px; background: #fffdf9; border: 1px solid #eadfcc; border-radius: 14px; padding: 18px 20px; }
+.myorder h2 { margin: 0 0 12px; font-size: 17px; color: #2b2320; }
+.lookup { display: flex; gap: 10px; }
+.lookup input { flex: 1; max-width: 340px; border: 1px solid #eadfcc; border-radius: 10px;
+                padding: 10px 12px; font-size: 14px; outline: none; background: #fff; }
+.lookup input:focus { border-color: #d9a066; }
+
+/* 订单详情卡（与客服卡片同构：商品行 + 四段轨迹） */
+.order-detail { margin-top: 14px; border-top: 1px dashed #eadfcc; padding-top: 14px; }
+.order-detail .o-title { font-size: 13px; color: #6f655c; margin-bottom: 10px; }
+.order-detail .o-row { display: flex; gap: 12px; align-items: center; }
+.order-detail .o-row img { width: 56px; height: 56px; border-radius: 10px; object-fit: cover; }
+.order-detail .o-row b { font-size: 14px; color: #2b2320; }
+.order-detail .o-row .sub { font-size: 12px; color: #8a7f76; margin-top: 2px; }
+.track { display: flex; gap: 6px; margin-top: 14px; flex-wrap: wrap; }
+.tp { font-size: 12px; padding: 5px 12px; border-radius: 999px; background: #f1ece3; color: #a09486; }
+.tp.done { background: #2f5d50; color: #fff; }
+.tp.cur  { background: #c1502e; color: #fff; }
+
+/* 按钮 */
+.btn { border: 1px solid #eadfcc; background: #fff; color: #5a5049; border-radius: 10px;
+       padding: 10px 16px; font-size: 14px; cursor: pointer; text-decoration: none; display: inline-block; }
+.btn:hover { border-color: #d9a066; }
+.btn-primary { background: #c1502e; border-color: #c1502e; color: #fff; font-weight: 700; }
+.btn-primary:hover { background: #a84326; }
+.btn-primary:disabled { background: #d8b7a9; border-color: #d8b7a9; cursor: wait; }
+
+/* 下单/支付弹层 */
+.modal-mask { position: fixed; inset: 0; background: rgba(43, 35, 32, .45); backdrop-filter: blur(2px);
+              display: flex; align-items: center; justify-content: center; z-index: 50; }
+.modal { width: min(400px, 92vw); background: #fffdf9; border-radius: 16px; padding: 24px;
+         position: relative; text-align: center; }
+.modal img { width: 120px; height: 120px; border-radius: 14px; object-fit: cover; }
+.modal h3 { margin: 12px 0 4px; font-size: 16px; color: #2b2320; }
+.m-feature { font-size: 12px; color: #8a7f76; margin: 0 0 8px; }
+.m-price { color: #c1502e; font-weight: 700; margin: 0 0 14px; }
+.qty-row { display: flex; align-items: center; justify-content: center; gap: 18px; margin-bottom: 16px; }
+.qty-row button { width: 34px; height: 34px; border-radius: 10px; border: 1px solid #eadfcc;
+                  background: #fff; font-size: 16px; cursor: pointer; }
+.qty-row span { font-weight: 700; font-size: 16px; min-width: 24px; }
+.modal .btn { width: 100%; box-sizing: border-box; }
+.modal-close { position: absolute; top: 10px; right: 12px; border: none; background: none;
+               font-size: 22px; color: #a09486; cursor: pointer; }
+.pay-tip, .done-tip { font-size: 14px; color: #2b2320; margin: 8px 0 12px; }
+.done-tip { color: #2f5d50; }
+.done-sub { font-size: 12px; color: #8a7f76; margin: 0 0 14px; }

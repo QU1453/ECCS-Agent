@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ECCS 商城 · 日本のいいもの</title>
+    <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/ui/style.css">
+    <link rel="stylesheet" href="/ui/shop.css">
+</head>
+
+<body>
+
+    <div class="paper-grain" aria-hidden="true"></div>
+    <div class="noren" aria-hidden="true"><span class="noren-notch"></span></div>
+
+    <main class="shop">
+        <header class="shop-head">
+            <a class="back" href="/">← 智能客服</a>
+            <div>
+                <h1>ECCS 商城</h1>
+                <p>日本のいいもの · 自营精选 · 下单后可直接向 AI 客服查询物流</p>
+            </div>
+        </header>
+
+        <!-- 货架：商品实时来自 /api/shop/products（SQLite） -->
+        <section class="grid" id="grid"></section>
+
+        <!-- 我的订单查询 -->
+        <section class="myorder">
+            <h2>我的订单</h2>
+            <div class="lookup">
+                <input id="orderNo" placeholder="输入订单号，如 2026090400001" />
+                <button id="lookupBtn" class="btn">查询</button>
+            </div>
+            <div id="orderBox"></div>
+        </section>
+    </main>
+
+    <!-- 下单/支付弹层 -->
+    <div class="modal-mask" id="modalMask" hidden>
+        <div class="modal">
+            <button class="modal-close" id="modalClose" aria-label="关闭">×</button>
+            <img id="mImg" alt="">
+            <h3 id="mName"></h3>
+            <p class="m-feature" id="mFeature"></p>
+            <p class="m-price">¥<b id="mPrice"></b></p>
+            <div class="qty-row">
+                <button id="qtyMinus">−</button>
+                <span id="qtyVal">1</span>
+                <button id="qtyPlus">＋</button>
+            </div>
+            <button id="buyBtn" class="btn btn-primary">提交订单</button>
+            <div id="payArea" hidden>
+                <p class="pay-tip">订单已生成：<b id="payOrderNo"></b>　应付 ¥<b id="payTotal"></b></p>
+                <button id="payBtn" class="btn btn-primary">模拟支付（演示用，不收真钱）</button>
+            </div>
+            <div id="doneArea" hidden>
+                <p class="done-tip">✅ 支付成功！<b id="doneOrderNo"></b></p>
+                <p class="done-sub">现在去问 AI 客服「订单 <span id="doneNo2"></span> 到哪了」，它会查到你的真实订单～</p>
+                <a class="btn btn-primary" href="/">去问智能客服 →</a>
+            </div>
+        </div>
+    </div>
+
+    <script src="/ui/shop.js"></script>
+</body>
+
+</html>

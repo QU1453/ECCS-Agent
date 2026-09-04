@@ -25,6 +25,7 @@ from pydantic import BaseModel
 
 import config
 from agents import Supervisor, classic_reply
+from tools import create_order, get_products, lookup_order, pay_order
 
 BASE_DIR = Path(__file__).resolve().parent
 HOST, PORT = config.HOST, config.PORT
@@ -46,6 +47,66 @@ app.mount("/ui", StaticFiles(directory=BASE_DIR / "ui"), name="ui")
 @app.get("/")
 async def index() -> FileResponse:
     return FileResponse(BASE_DIR / "ui" / "index.html")
+
+
+# ===== 自营商城（demo 用最小闭环：商品 → 下单 → 模拟支付 → 问客服）=====
+@app.get("/shop")
+async def shop() -> FileResponse:
+    return FileResponse(BASE_DIR / "ui" / "shop.html")
+
+
+@app.get("/api/shop/products")
+async def shop_products() -> list[dict]:
+    """商品列表（商城货架，实时读库）。"""
+    return list(get_products().values())
+
+
+class BuyRequest(BaseModel):
+    product_code: str
+    qty: int = 1
+
+
+@app.post("/api/shop/buy")
+async def shop_buy(req: BuyRequest) -> JSONResponse:
+    """下单：生成未付款订单，返回订单号（前端再调 /api/shop/pay 完成模拟支付）。"""
+    try:
+        order = create_order(req.product_code.strip(), max(1, int(req.qty)))
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    return JSONResponse({"order_no": order["order_no"], "total": order["total"],
+                         "status": order["status"], "product": order["product"]})
+
+
+class PayRequest(BaseModel):
+    order_no: str
+
+
+@app.post("/api/shop/pay")
+async def shop_pay(req: PayRequest) -> JSONResponse:
+    """模拟支付：订单未付款 → 已付款（真实版替换为支付网关回调）。"""
+    order = pay_order(req.order_no.strip())
+    if order is None:
+        return JSONResponse({"error": "订单不存在"}, status_code=404)
+    return JSONResponse({"order_no": order["order_no"], "status": order["status"],
+                         "paid_at": order["paid_at"]})
+
+
+@app.get("/api/shop/orders/{order_no}")
+async def shop_order_detail(order_no: str) -> JSONResponse:
+    """订单详情（我的订单页：状态 + 轨迹），与客服回答同源同库。"""
+    order = lookup_order(order_no)
+    if order is None:
+        return JSONResponse({"error": "订单不存在"}, status_code=404)
+    return JSONResponse({
+        "order_no": order["order_no"],
+        "status": order["status"],
+        "qty": order["qty"],
+        "total": order["total"],
+        "paid_at": order["paid_at"],
+        "carrier": order["carrier"],
+        "steps": order["steps"],
+        "product": order["product"],
+    })
 
 
 class AskRequest(BaseModel):
