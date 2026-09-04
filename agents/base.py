@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from config import MODEL_ID
-from memory import get_checkpointer, thread_id_for
+from memory import get_short_term, thread_id_for
 from tools import lookup_order, recommend_for
 
 # ---- LangGraph 相关为可选依赖：装不上也能以"本地兜底模式"运行 -------------------
@@ -60,6 +60,7 @@ class ReActAgentBase:
         self.model = model
         self.reason = None  # 初始化失败/未配置的原因（供日志展示）
         self._graph = None
+        self._stm = None    # 进程级单例短期记忆（压缩与推理共享同一 saver）
         if not api_key:
             self.reason = "未配置 OPENAI_API_KEY，运行于本地规则兜底模式"
             return
@@ -68,9 +69,11 @@ class ReActAgentBase:
             return
         try:
             llm = ChatOpenAI(model=model, api_key=api_key, base_url=base_url or None, temperature=0.3)
-            # 多轮记忆：memory/ 提供的 checkpointer 按 thread_id 隔离会话
+            # 多轮记忆：memory/ 提供的 checkpointer 按 thread_id 隔离会话；
+            # 压缩器注入同一 llm，超阈值裁剪时滚动摘要会回流进线程（不丢上下文）
+            self._stm = get_short_term(llm=llm)
             self._graph = _build_react_agent(
-                llm, self.tools, self.system_prompt, checkpointer=get_checkpointer()
+                llm, self.tools, self.system_prompt, checkpointer=self._stm.saver
             )
         except Exception as exc:  # noqa: BLE001
             self.reason = f"Agent 初始化失败（{exc.__class__.__name__}: {exc}）"
@@ -95,7 +98,14 @@ class ReActAgentBase:
             state = self._graph.get_state(config)
             prev_count = len(state.values.get("messages", [])) if (state and state.values) else 0
             result = self._graph.invoke({"messages": [{"role": "user", "content": question}]}, config)
-            return self._format_result(result, prev_count)
+            formatted = self._format_result(result, prev_count)
+            try:
+                # 每轮推理后触发压缩检查：阈值内只多一次 get_state，零 LLM 开销；
+                # 超阈值时裁剪旧消息并把滚动摘要回流进线程，下一轮自动携带
+                self._stm.maybe_compress(session_id)
+            except Exception:  # noqa: BLE001 - 压缩失败不影响本轮回复
+                pass
+            return formatted
         except Exception:  # noqa: BLE001 - 网络/额度/格式异常都交给兜底
             return None
 

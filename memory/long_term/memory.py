@@ -260,6 +260,7 @@ class LongTermMemory:
                 self._conn.commit()
                 self._label_user.clear()
                 self._ann = None
+                self._cache = None  # 丢弃内存缓存（含旧 provider 的维度），否则换 Provider 会误报维度不一致
                 if self.ann_path.exists():
                     self.ann_path.unlink()
             else:

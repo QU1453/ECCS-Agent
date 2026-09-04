@@ -8,6 +8,7 @@
 - manager.py：MemoryManager 统一入口（LLM 输入接口 / 后端数据输入接口 / build_context）。
 
 兼容层（保持 agents/ 原有用法不变）：
+- get_short_term(llm=None)：进程级单例短期记忆（含压缩器，llm 优先由接入方注入）；
 - get_checkpointer()：进程级单例 checkpointer（由 MemorySaver 升级为 SQLite 持久化 SqliteSaver）；
 - thread_id_for(session_id)：会话 ID → 线程命名空间（"session:{id}"）。
 
@@ -23,6 +24,7 @@
 
 一键演示：python -m memory.demo
 """
+import os
 from pathlib import Path
 
 from .long_term.ann import AnnIndex
@@ -45,19 +47,49 @@ __all__ = [
     "HashEmbeddingProvider",
     "OpenAIEmbeddingProvider",
     "get_checkpointer",
+    "get_short_term",
     "thread_id_for",
 ]
 
 _compat_stm = None  # 兼容层懒加载单例（只建短期记忆，长期记忆按需另建 MemoryManager）
 
 
-def get_checkpointer():
-    """兼容旧 API：进程级单例 checkpointer（现升级为 SQLite 持久化的 SqliteSaver）。"""
+def _env_llm():
+    """未注入 llm 时按环境变量自建（OpenAI 兼容）；无 Key / 缺依赖 / 失败 → None（纯裁剪降级）。"""
+    if not os.getenv("OPENAI_API_KEY", "").strip():
+        return None
+    try:
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(
+            model=os.getenv("OPENAI_MODEL", "glm-5.3-flash").strip() or "glm-5.3-flash",
+            api_key=os.getenv("OPENAI_API_KEY"),
+            base_url=os.getenv("OPENAI_BASE_URL") or None,
+            temperature=0.3,
+        )
+    except Exception:
+        return None
+
+
+def get_short_term(llm=None):
+    """进程级单例短期记忆（含压缩器）；llm 优先由接入方注入，首次调用定型。
+
+    server.py 先 import config（已 load_dotenv）再 import agents/memory，
+    因此服务路径下环境变量必然就绪；脱离 server 单独使用且无环境变量时
+    退化为纯裁剪模式（与无 Key 行为一致）。
+    """
     global _compat_stm
     if _compat_stm is None:
+        from .short_term.compress import Compressor
         from .short_term.memory import ShortTermMemory
 
         _compat_stm = ShortTermMemory(
-            Path(__file__).resolve().parent / "short_term" / "data" / "short_term.sqlite"
+            Path(__file__).resolve().parent / "short_term" / "data" / "short_term.sqlite",
+            compressor=Compressor(llm=llm or _env_llm()),
         )
-    return _compat_stm.saver
+    return _compat_stm
+
+
+def get_checkpointer():
+    """兼容旧 API：进程级单例 checkpointer（现升级为 SQLite 持久化的 SqliteSaver）。"""
+    return get_short_term().saver

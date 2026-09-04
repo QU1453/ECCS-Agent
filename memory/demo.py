@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Memory 模块一键演示：python -m Memory.demo
+"""Memory 模块一键演示：python -m memory.demo
 
 覆盖：LLM 输入接口（LangGraph checkpointer + 压缩）、后端数据输入接口（facts + 文档分块）、
 ANN-RAG 召回（速度 + 准确率对照）、跨实例持久化、build_context 四段组装。

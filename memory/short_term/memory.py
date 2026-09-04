@@ -9,7 +9,10 @@
     result = graph.invoke({"messages": [...]}, mm.chat_config(session_id))
 
 约定：消息状态 channel 名为 "messages"（langgraph MessagesState）。
-压缩摘要存本库 summaries 表（不动接入方 state schema），get_history 自动注入 system 消息。
+压缩摘要存本库 summaries 表（不动接入方 state schema），get_history 自动注入 system 消息；
+压缩触发时摘要会以 SystemMessage 回流到该 thread（标记 [早前对话摘要]），
+create_react_agent 等接入方下一轮 invoke 自动携带，不丢被压缩的上下文；
+get_history 已对线程内摘要消息去重，表注入是唯一摘要出口。
 单进程假设；更大并发时换 Postgres checkpointer 即可（接口不变）。
 """
 from __future__ import annotations
@@ -17,7 +20,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, RemoveMessage, SystemMessage
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 
@@ -35,6 +38,14 @@ def _to_message(role: str, content: str) -> BaseMessage:
 def thread_id_for(session_id: str) -> str:
     """会话 ID → checkpointer 线程命名空间（兼容原 memory/short_term.py 的 "session:" 前缀）。"""
     return f"session:{session_id}"
+
+
+_SUMMARY_MARKER = "[早前对话摘要]"  # 回流摘要消息的统一标记（get_history 注入前缀同源）
+
+
+def _is_summary_msg(m: BaseMessage) -> bool:
+    """回流进线程的滚动摘要消息（SystemMessage 且带标记前缀）。"""
+    return isinstance(m, SystemMessage) and str(getattr(m, "content", "")).startswith(_SUMMARY_MARKER)
 
 
 class ShortTermMemory:
@@ -91,6 +102,8 @@ class ShortTermMemory:
         if summary:
             out.append({"role": "system", "content": f"[早前对话摘要]\n{summary}"})
         for m in self.get_messages(session_id):
+            if _is_summary_msg(m):
+                continue  # 线程内回流摘要去重：表注入是唯一摘要出口，避免双份
             out.append({
                 "role": _ROLE_MAP.get(getattr(m, "type", "human"), "user"),
                 "content": getattr(m, "content", ""),
@@ -108,17 +121,23 @@ class ShortTermMemory:
 
     # ---------- 压缩 ----------
     def maybe_compress(self, session_id: str) -> dict:
-        """超过阈值触发：旧消息 → LLM 滚动摘要（无 LLM 降级为纯裁剪）→ RemoveMessage 移除。"""
+        """超过阈值触发：旧消息裁剪 + 滚动摘要写回线程（无 LLM 降级为纯裁剪）。
+
+        摘要回流：裁剪旧消息的同时，把摘要作为 SystemMessage 写回该 thread，
+        create_react_agent 等接入方下一轮 invoke 自动携带，不丢被压缩的上下文。
+        """
         msgs = self.get_messages(session_id)
         total = len(msgs)
         if not self.compressor.needs_compress(total):
             return {"compressed": False, "messages": total,
                     "reason": f"{total} <= 阈值 {self.compressor.compress_threshold}"}
         keep = self.compressor.keep_recent
-        old, recent = msgs[:-keep], msgs[-keep:]
+        old_all = msgs[:-keep]                                  # 本轮全部待裁剪消息（含旧摘要消息）
+        old = [m for m in old_all if not _is_summary_msg(m)]    # 摘要消息不参与摘要输入（避免重复拼 prompt）
         prev = self.get_summary(session_id)
         new_summary = self.compressor.summarize(old, prev)
-        if new_summary and new_summary != prev:
+        summary_updated = bool(new_summary and new_summary != prev)
+        if summary_updated:                                     # 摘要表照旧落库（手动组装路径的唯一来源）
             self._conn.execute(
                 "INSERT INTO summaries(thread_id, summary) VALUES(?,?) "
                 "ON CONFLICT(thread_id) DO UPDATE SET summary=excluded.summary,"
@@ -126,18 +145,25 @@ class ShortTermMemory:
                 (str(session_id), new_summary),
             )
             self._conn.commit()
-        removes = Compressor.messages_to_remove(old)
-        if removes:
+        # 裁剪 + 摘要回流：一个 checkpoint step 原子提交（先删旧摘要消息再写新摘要）
+        removes = Compressor.messages_to_remove(old_all)
+        carried = (new_summary or prev or "").strip()  # 未更新时回填旧摘要，防止二轮压缩丢摘要
+        if carried:
+            writes = removes + [SystemMessage(content=f"{_SUMMARY_MARKER}\n{carried}")]
+        else:
+            writes = removes
+        if writes:
             try:
-                self._writer.update_state(self.chat_config(session_id), {"messages": removes})
+                self._writer.update_state(self.chat_config(session_id), {"messages": writes})
             except Exception:  # 兜底：同样走 reducer 的 invoke 路径
-                self._writer.invoke({"messages": removes}, self.chat_config(session_id))
+                self._writer.invoke({"messages": writes}, self.chat_config(session_id))
         return {
             "compressed": True,
             "messages_before": total,
             "removed": len(removes),
-            "summary_updated": bool(new_summary and new_summary != prev),
-            "messages_after": self.count_messages(session_id),
+            "summary_updated": summary_updated,
+            "summary_injected": bool(carried),
+            "messages_after": self.count_messages(session_id),  # 回流时 = keep_recent + 1（含摘要）
         }
 
     # ---------- 维护 ----------
