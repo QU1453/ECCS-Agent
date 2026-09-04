@@ -1,6 +1,6 @@
 /* =====================================================================
    ECCS 智能客服 · 单对话窗口
-   零售礼宾台风格：暖纸底 / 深墨 / 柿子橙
+   和纸暖帘风格：暖纸底 / 深墨 / 柿子橙 / 中日双语
    ===================================================================== */
 :root {
   --paper: #f3eee4;
@@ -13,8 +13,9 @@
   --accent-deep: #bf420d;
   --accent-soft: #fbe7d8;
   --ok: #1e8e5a;
+  --indigo: #26418f;
   --shadow-1: 0 1px 2px rgba(33,28,21,.05), 0 14px 34px -20px rgba(33,28,21,.3);
-  --font: "Manrope", "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", sans-serif;
+  --font: "Zen Kaku Gothic New", "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
   --font-display: "Fraunces", "Songti SC", "STSong", serif;
   --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
 }
@@ -27,11 +28,31 @@ body {
   display: grid; place-items: center;
   background:
     radial-gradient(900px 480px at 90% -10%, rgba(228,87,27,.12), transparent 60%),
-    radial-gradient(700px 420px at -8% 108%, rgba(30,142,90,.07), transparent 55%),
+    radial-gradient(700px 420px at -8% 108%, rgba(38,65,143,.06), transparent 55%),
     var(--paper);
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
+
+/* ---- 和纸纹理（SVG 噪点，覆盖层）---- */
+.paper-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: 5; opacity: .5;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.13 0 0 0 0 0.11 0 0 0 0 0.08 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ---- 顶部暖帘装饰（柿子橙布帘 + 切口）---- */
+.noren {
+  position: fixed; top: 0; left: 0; right: 0; height: 14px; z-index: 4;
+  background: linear-gradient(180deg, var(--accent), #d24e15);
+  box-shadow: 0 3px 10px -2px rgba(191,66,13,.4);
+  animation: norenDrop .7s cubic-bezier(.2,.9,.25,1.05);
+}
+.noren-notch {
+  position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%);
+  width: 56px; height: 12px; background: var(--paper);
+  clip-path: polygon(0 100%, 18% 0, 82% 0, 100% 100%, 62% 100%, 50% 38%, 38% 100%);
+}
+@keyframes norenDrop { from { transform: translateY(-100%); } }
 
 /* ---- 对话窗 ---- */
 .chat {
@@ -76,6 +97,26 @@ body {
 }
 .icon-btn:hover { background: rgba(33,28,21,.06); color: var(--ink); }
 .icon-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---- 头部右侧：清空 + 语言切换 ---- */
+.head-actions { display: flex; align-items: center; gap: 10px; }
+.lang-switch {
+  display: flex; padding: 3px; gap: 2px;
+  background: #fff; border: 1px solid var(--line); border-radius: 999px;
+  box-shadow: var(--shadow-1);
+}
+.lang-btn {
+  width: 36px; height: 28px; border: 0; border-radius: 999px;
+  background: transparent; color: var(--ink-2); cursor: pointer;
+  font-family: var(--font); font-size: 12.5px; font-weight: 800; letter-spacing: .02em;
+  transition: .18s;
+}
+.lang-btn:hover { color: var(--accent); }
+.lang-btn.active {
+  background: var(--ink); color: #f8ead2;
+  box-shadow: 0 4px 10px -4px rgba(33,28,21,.55);
+}
+.lang-btn.active:hover { color: #fff; }
 
 /* ---- 消息区 ---- */
 .msgs {

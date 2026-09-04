@@ -32,11 +32,14 @@
 | 智能体 | LangGraph ReAct（`agents/`）：supervisor 主控调度专职智能体，LLM 自主决策 → 工具调用 → 回复生成 |
 | 客服工具 | `tools/`：订单查询 / 物流跟踪 / 退换货办理 / 商品推荐（演示数据，多智能体共享） |
 | 界面 | 原生 HTML / CSS / JS（`ui/`，可直接独立预览） |
+| 记忆 | `memory/`：LangGraph MemorySaver 短期会话记忆（thread_id 隔离，多轮上下文自动携带） |
 | 兜底引擎 | 未配置 Key 时 `agents/customer_service.py` 内置关键词路由，效果与前端演示一致 |
 | 容器化 | Docker + docker-compose（`Dockerfile` / `docker-compose.yml` / `.dockerignore`） |
 | 打包 | PyInstaller（onefile，规划中） |
 
 数据链路：`网页输入 → POST /api/ask → supervisor 调度专职智能体 → 工具调用 → 返回 {reply, intent, data} → 前端渲染气泡/卡片`。
+
+**记忆机制**：LLM 模式下，多轮对话记忆由 `memory/` 提供的 LangGraph checkpointer（MemorySaver）托管——按 `session_id` 映射 thread_id，自动携带历史上下文，server 端无需自行管理会话；进程内有效，重启清空（需要持久化时替换为 SqliteSaver 落盘）。未配置 Key 的兜底模式为单轮无记忆。长期记忆（用户画像 / 跨会话偏好）规划中，届时在 `memory/` 下新增 `long_term.py`。
 
 **多智能体扩展**：新增智能体 = 在 `agents/` 加一个文件（参考 `customer_service.py`）并在 `supervisor.py` 注册；工具放 `tools/` 供所有智能体共享，互不干扰。三人三分支协作时，可各自认领一个智能体文件开发，Git 冲突面最小。
 
@@ -50,6 +53,7 @@
 ├── Dockerfile        # 单服务镜像（Python 3.12 slim）
 ├── docker-compose.yml# 一键编排：端口 8623，Key 走环境变量注入
 ├── server.py         # FastAPI 后端入口：托管 ui + /api/ask
+├── config.py         # 智能体配置槽：API Key / 请求地址 / 模型 ID 统一入口
 ├── agents/           # 智能体目录（多智能体协作，一人一文件）
 │   ├── supervisor.py       # 主控智能体：统一入口，调度专职智能体
 │   └── customer_service.py # 客服智能体（LangGraph + 无 Key 本地兜底）
@@ -58,6 +62,8 @@
 │   ├── order.py      # 订单 / 物流查询
 │   ├── after_sales.py# 退换货办理
 │   └── recommend.py  # 商品推荐
+├── memory/           # 记忆目录（多智能体共享）
+│   └── short_term.py # 短期会话记忆：MemorySaver 单例 + thread_id 规则
 ├── requirements.txt  # Python 依赖
 ├── .env.example      # 密钥配置样例（复制为 .env 后填写，不入库）
 └── ui/
@@ -65,6 +71,31 @@
     ├── style.css     # 设计系统（暖纸 / 深墨 / 柿子橙）
     └── app.js        # 交互 + 内置演示路由（预留 /api/ask 桥接）
 ```
+
+## 智能体配置槽（API / 请求地址 / 模型 ID）
+
+所有智能体的 LLM 配置集中在 `config.py` 一个槽位，三个字段：
+
+| 槽位 | 变量 | 说明 | 示例 |
+| --- | --- | --- | --- |
+| API Key | `OPENAI_API_KEY` | 真实密钥，只放 `.env` / 环境变量，绝不入库 | `sk-...` |
+| 请求地址 | `OPENAI_BASE_URL` | 本项目默认**智谱开放平台**（OpenAI 兼容）；OpenAI 官方留空 | `https://open.bigmodel.cn/api/paas/v4` |
+| 模型 ID | `OPENAI_MODEL` | 本项目默认 **GLM-5.3-Flash**；兼容 OpenAI 协议的模型名均可 | `glm-5.3-flash` |
+
+填写方式（二选一）：
+
+```bash
+# 方式 A：本地 .env（推荐；.env 已被 .gitignore 拦截）
+cp .env.example .env
+# 编辑 .env，取消注释并填三个槽位
+
+# 方式 B：环境变量（Docker / 云环境）
+export OPENAI_API_KEY=sk-xxx
+export OPENAI_BASE_URL=https://api.deepseek.com/v1
+export OPENAI_MODEL=deepseek-chat
+```
+
+约定：智能体文件（`agents/`）一律从 `config.py` 取值，不自行读环境变量——换模型 / 换服务商只改这一处；三个槽位全留空时自动走本地规则兜底，演示不断线。
 
 ## 本地运行
 

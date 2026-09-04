@@ -37,7 +37,16 @@ def lookup_order(order_no: str) -> dict | None:
 
 
 def query_order_info(order_no: str) -> str:
-    """查询订单基本信息：商品、金额、下单时间与当前状态。order_no：订单号字符串。"""
+    """查询订单基本信息：商品、金额、下单时间与当前状态。
+
+    何时使用：用户询问订单详情（买了什么、多少钱、什么时候下的单、订单状态如何）时调用；仅凭订单号查状态，不包含物流轨迹（轨迹请用 track_logistics）。
+
+    调用格式（JSON）：
+    {"tool": "query_order_info", "parameters": {"order_no": "<订单号，字符串类型>"}}
+
+    参数说明：
+    - order_no：订单号，字符串类型（string），例如 "2026081200012"，用户消息中形如 2026xxxxxxxx 的连续数字。
+    """
     order = lookup_order(order_no)
     if order is None:
         return json.dumps({"found": False, "hint": "未查到该订单，请先核对订单号"}, ensure_ascii=False)
@@ -57,7 +66,16 @@ def query_order_info(order_no: str) -> str:
 
 
 def track_logistics(order_no: str) -> str:
-    """查询订单物流轨迹与预计送达时间。order_no：订单号字符串。"""
+    """查询订单物流轨迹与预计送达时间。
+
+    何时使用：用户询问包裹/订单到哪了、物流进度、快递状态、什么时候送到时调用；需要物流轨迹（承运商、当前位置、预计送达）时用本工具，而不是 query_order_info。
+
+    调用格式（JSON）：
+    {"tool": "track_logistics", "parameters": {"order_no": "<订单号，字符串类型>"}}
+
+    参数说明：
+    - order_no：订单号，字符串类型（string），例如 "2026081200012"，用户消息中形如 2026xxxxxxxx 的连续数字。
+    """
     order = lookup_order(order_no)
     if order is None:
         return json.dumps({"found": False, "hint": "未查到该订单的物流信息，请先核对订单号"}, ensure_ascii=False)

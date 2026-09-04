@@ -10,31 +10,24 @@
     python server.py          # 默认 http://127.0.0.1:8623
     uvicorn server:app --host 127.0.0.1 --port 8623
 
-密钥：OPENAI_API_KEY 从环境变量或项目根目录 `.env` 读取（详见 .env.example），
+密钥：配置统一走 config.py（智能体配置槽），真实 Key 放 .env / 环境变量，
 本文件不写入、不打印任何密钥。
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import config
 from agents import Supervisor, classic_reply
 
 BASE_DIR = Path(__file__).resolve().parent
-load_dotenv(BASE_DIR / ".env")  # 读取本地密钥配置（已被 .gitignore 拦截）
-
-HOST = os.getenv("SERVER_HOST", "127.0.0.1")
-PORT = int(os.getenv("SERVER_PORT", "8623"))
-API_KEY = os.getenv("OPENAI_API_KEY", "").strip() or None
-BASE_URL = os.getenv("OPENAI_BASE_URL", "").strip() or None
-MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+HOST, PORT = config.HOST, config.PORT
 
 app = FastAPI(title="ECCS Agent", version="0.1.0")
 
@@ -61,28 +54,25 @@ class AskRequest(BaseModel):
 
 
 class AgentService:
-    """懒加载单例 Supervisor（多智能体主控）+ 会话记忆（最多保留最近 20 条）。"""
+    """懒加载单例 Supervisor（多智能体主控）；多轮记忆由 memory/ 的 checkpointer 托管。"""
 
     def __init__(self) -> None:
         self._supervisor: Supervisor | None = None
-        self.sessions: dict[str, list[dict]] = {}
 
     def supervisor(self) -> Supervisor:
         if self._supervisor is None:
-            self._supervisor = Supervisor(api_key=API_KEY, base_url=BASE_URL, model=MODEL)
+            self._supervisor = Supervisor(
+                api_key=config.API_KEY, base_url=config.BASE_URL, model=config.MODEL_ID
+            )
         return self._supervisor
 
     def ask(self, message: str, session_id: str) -> dict:
         sup = self.supervisor()
-        history = self.sessions.setdefault(session_id, [])
-        # 真实 LLM：携带上下文多轮对话（supervisor 调度专职智能体）
-        result = sup.answer(message, history) if sup.available else None
+        # 真实 LLM：多轮记忆 = LangGraph MemorySaver 按 thread_id(session_id) 隔离
+        result = sup.answer(message, session_id) if sup.available else None
         if result and result.get("reply"):
-            history.append({"role": "user", "content": message})
-            history.append({"role": "assistant", "content": result["reply"]})
-            del history[:-20]  # 控制记忆长度
             return result
-        # 兜底：未配置 Key / Agent 不可用 / 调用异常
+        # 兜底：未配置 Key / Agent 不可用 / 调用异常（单轮，无记忆）
         return classic_reply(message)
 
 

@@ -6,38 +6,53 @@
 <title>ECCS 智能客服</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
+  <!-- 和纸纹理底 + 顶部暖帘装饰 -->
+  <div class="paper-grain" aria-hidden="true"></div>
+  <div class="noren" aria-hidden="true">
+    <span class="noren-notch"></span>
+  </div>
+
   <main class="chat" id="chat">
+
     <header class="chat-head">
       <div class="shop">
-        <div class="avatar">E</div>
+        <div class="avatar">絵</div>
         <div class="shop-meta">
-          <h1>ECCS 智能客服</h1>
-          <p><span class="status"><i class="dot"></i>在线 · 秒回</span></p>
+          <h1 data-i18n="title">ECCS 智能客服</h1>
+          <p><span class="status"><i class="dot"></i><span data-i18n="status">在线 · 秒回</span></span></p>
         </div>
       </div>
-      <button class="icon-btn" id="clearBtn" title="清空对话">
-        <svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6.5 7l.8 12h9.4l.8-12"/></svg>
-      </button>
+
+      <div class="head-actions">
+        <button class="icon-btn" id="clearBtn" title="清空对话" data-i18n-title="clearTip" aria-label="清空对话">
+          <svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6.5 7l.8 12h9.4l.8-12"/></svg>
+        </button>
+        <!-- 语言一键切换 -->
+        <div class="lang-switch" role="group" aria-label="语言切换 / 言語切替">
+          <button id="langZH" class="lang-btn active" type="button" aria-pressed="true">中</button>
+          <button id="langJA" class="lang-btn" type="button" aria-pressed="false">日</button>
+        </div>
+      </div>
     </header>
 
     <div class="msgs" id="msgs"></div>
 
     <footer class="composer">
       <div class="quick-row" id="chips">
-        <button class="quick" data-q="订单到哪了？" type="button">订单到哪了？</button>
-        <button class="quick" data-q="怎么退货？" type="button">怎么退货？</button>
-        <button class="quick" data-q="推荐一款耳机" type="button">推荐一款耳机</button>
+        <button class="quick" data-q-key="q1" type="button" data-i18n="q1">订单到哪了？</button>
+        <button class="quick" data-q-key="q2" type="button" data-i18n="q2">怎么退货？</button>
+        <button class="quick" data-q-key="q3" type="button" data-i18n="q3">推荐一款耳机</button>
       </div>
       <div class="composer-box">
-        <textarea id="input" rows="1" placeholder="请输入您的问题…（Enter 发送）"></textarea>
+        <textarea id="input" rows="1" data-i18n-ph="placeholder" placeholder="请输入您的问题…（Enter 发送）"></textarea>
         <div class="composer-ctrl">
-          <span class="hint" id="hint">AI 智能体自动接待 · 平均耗时 1.5s</span>
-          <button class="btn btn-send" id="sendBtn" type="button">
+          <span class="hint" id="hint" data-i18n="hint">AI 智能体自动接待 · 平均耗时 1.5s</span>
+          <button class="btn btn-send" id="sendBtn" type="button" aria-label="发送">
             <svg viewBox="0 0 24 24"><path d="M4.5 11.5 20 4l-7.5 15.5-2-6-6-2z"/></svg>
           </button>
         </div>
