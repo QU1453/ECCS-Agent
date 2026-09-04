@@ -132,7 +132,10 @@ class ReActAgentBase:
             except Exception:  # noqa: BLE001 - 压缩失败不影响本轮回复
                 pass
             return formatted
-        except Exception:  # noqa: BLE001 - 网络/额度/格式异常都交给兜底
+        except Exception as exc:  # noqa: BLE001 - 网络/额度/格式异常都交给兜底
+            # 降级必须可见：余额不足 / Key 失效 / 网络异常时在服务端日志里给出原因，
+            # 避免表现为"智能体说固定话术"却查不到为什么（如 GLM 余额用完 → 401/429）
+            print(f"[Agent] LLM 调用失败，转本地兜底（{exc.__class__.__name__}: {exc}）")
             return None
 
     # ---------- 内部：把 Agent 运行结果整理为结构化回复 ----------
