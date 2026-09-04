@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-from .base import ReActAgentBase, card_items
+from .base import ReActAgentBase, card_items, is_japanese
 from tools import recommend_for, recommend_products
 
 # 售前导购智能体的系统提示词：主管买前咨询与商品推荐
@@ -24,7 +24,7 @@ SYSTEM_PROMPT = """你是「ECCS」跨境电商售前导购 Agent，面向海外
 - 用户比价 → 引用工具返回的真实价格，客观对比优缺点。
 
 回复要求：
-1. 简洁、热情、像真人导购；使用与用户相同的语言（中文或日本語）；
+1. 简洁、热情、像真人导购；自动跟随用户语言——中文用热情口语，日语用丁寧語・敬語（です・ます調、称呼「お客様」、推荐用「おすすめいたします」）；
 2. 每款商品给出具体推荐理由（结合工具返回的 feature），不得编造价格、库存、优惠；
 3. 一次最多推荐 3 款，并明确指出最推荐哪一款及原因；
 4. 不要向用户暴露工具名称、JSON 等内部实现细节。"""
@@ -42,38 +42,55 @@ class PreSalesAgent(ReActAgentBase):
 # 本地兜底路由：未配置 Key / 后端异常时，售前导购的本地规则回复
 # ============================================================================
 def classic_presales_reply(q: str) -> dict:
-    """关键词路由 + 结构化推荐卡数据，返回 {reply, intent, data}。"""
+    """关键词路由 + 结构化推荐卡数据，返回 {reply, intent, data}（日语用户回复日语敬体）。"""
     s = q.lower()
+    ja = is_japanese(q)  # 日语用户：回复文案切换为日语敬体（卡片商品名由前端 localize 转日文）
 
-    # 价格 / 比价类问题：给出推荐并说明价格口径
-    if re.search(r"多少钱|价格|价位|比价|便宜|贵", s):
+    # 价格 / 比价类问题（中日双语）：给出推荐并说明价格口径
+    if re.search(r"多少钱|价格|价位|比价|便宜|贵|いくら|価格|値段|安い|高い", s):
         items = recommend_for(["耳机", "键盘", "充电宝"])
         return {
             "reply": (
                 "为您挑了 3 款高性价比好物（价格以商品页实时为准）："
                 "最推荐第一款，同价位里口碑最好、功能最均衡～"
+                if not ja
+                else "コストパフォーマンスの高い3商品をご提案いたします（価格は商品ページの実時価格が基準）：イチオシは1つ目、同価格帯で最も人気とバランスが取れております～"
             ),
             "intent": "recommend",
             "data": {"items": card_items(items)},
         }
 
-    # 品类咨询：按提及的品类推荐
+    # 品类咨询：按提及的品类推荐（中日关键词均支持）
     category = None
-    for kw, tags in (("耳机", ["耳机"]), ("键盘", ["键盘"]), ("保温杯", ["保温杯"]), ("充电宝", ["充电宝"])):
+    for kw, tags in (
+        ("耳机", ["耳机"]), ("イヤホン", ["耳机"]), ("ヘッドホン", ["耳机"]),
+        ("键盘", ["键盘"]), ("キーボード", ["键盘"]),
+        ("保温杯", ["保温杯"]), ("マグボトル", ["保温杯"]), ("水筒", ["保温杯"]),
+        ("充电宝", ["充电宝"]), ("バッテリー", ["充电宝"]),
+    ):
         if kw in s:
             category = tags
             break
-    if re.search(r"推荐|想买|哪款|什么好|好物|商品|选|看看", s) or category:
+    if re.search(r"推荐|想买|哪款|什么好|好物|商品|选|看看|おすすめ|推薦|どれ|選ぶ|見たい", s) or category:
         items = recommend_for(category or ["耳机", "键盘", "充电宝"])
-        name = category[0] if category else "好物"
-        return {
-            "reply": f"根据您的需求推荐这 3 款{name}，最推荐第一款，性价比和口碑都在线～",
-            "intent": "recommend",
-            "data": {"items": card_items(items)},
-        }
+        if ja:
+            name = {"耳机": "イヤホン", "键盘": "キーボード", "保温杯": "マグボトル", "充电宝": "モバイルバッテリー"}.get(
+                category[0] if category else "", "人気商品"
+            )
+            reply = f"ご要望に合わせて{name}を3商品ご提案いたします。イチオシは1つ目、コスパと口コミともに自信ありでございます～"
+        else:
+            name = category[0] if category else "好物"
+            reply = f"根据您的需求推荐这 3 款{name}，最推荐第一款，性价比和口碑都在线～"
+        return {"reply": reply, "intent": "recommend", "data": {"items": card_items(items)}}
 
     # 问候语
     if re.search(r"在吗|你好|哈喽|hi|hello|こんにちは", s):
+        if ja:
+            return {
+                "reply": "こんにちは～ECCS のプリセールス（ご案内担当）でございます。ご予算やご要望をお聞かせいただければ、最適な商品をご提案いたします～",
+                "intent": "none",
+                "data": None,
+            }
         return {
             "reply": "您好呀～我是 ECCS 的售前导购，想买什么告诉我需求或预算，帮您挑最合适的～",
             "intent": "none",
@@ -81,6 +98,12 @@ def classic_presales_reply(q: str) -> dict:
         }
 
     # 默认引导
+    if ja:
+        return {
+            "reply": "何かお探しでございますか？<br>「イヤホンのおすすめ / マグボトルどれ / バッテリーの価格」などとお試しください。",
+            "intent": "none",
+            "data": None,
+        }
     return {
         "reply": "想找点什么好物呢？<br>可以试试问我：<span class='em'>推荐一款耳机 / 保温杯哪款好 / 充电宝价格</span>。",
         "intent": "none",

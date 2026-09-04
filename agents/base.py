@@ -16,9 +16,26 @@
 """
 from __future__ import annotations
 
+import re
+
 from config import MODEL_ID
 from memory import get_short_term, thread_id_for
 from tools import lookup_order, recommend_for
+
+# ---- 日语识别与回复提示：命中假名即视为日语用户，LLM 回复切换为日语敬体 --------------
+_JA_RE = re.compile(r"[\u3040-\u309f\u30a0-\u30ff]")  # 平假名 / 片假名
+# 仅汉字无法区分中日（如"注文"），假名是日语的强特征；纯中文/英文不命中
+_JA_REPLY_HINT = (
+    "本次对话用户使用日语。请用日语回复，并遵守日本电商客服敬语规范：\n"
+    "- 全程使用丁寧語・敬語（です・ます調），称呼顾客为「お客様」；\n"
+    "- 常用服务用语：「かしこまりました」「恐れ入りますが」「お問い合わせいただきありがとうございます」；\n"
+    "- 金额用「円」、日期用日本书写习惯；专有名词（商品名、配送公司）保持原文。"
+)
+
+
+def is_japanese(text: str) -> bool:
+    """是否日语用户输入（含假名即视为日语；供 LLM 提示与兜底双语回复共用）。"""
+    return bool(_JA_RE.search(text or ""))
 
 # ---- LangGraph 相关为可选依赖：装不上也能以"本地兜底模式"运行 -------------------
 try:
@@ -97,7 +114,16 @@ class ReActAgentBase:
             # 卡片提取只看本轮新增部分，避免把旧轮工具调用误当卡片
             state = self._graph.get_state(config)
             prev_count = len(state.values.get("messages", [])) if (state and state.values) else 0
-            result = self._graph.invoke({"messages": [{"role": "user", "content": question}]}, config)
+            # 日语用户：注入一条系统提示，要求本轮及后续以日语敬体回复（中文/英文不受影响）
+            if is_japanese(question):
+                result = self._graph.invoke(
+                    {"messages": [{"role": "system", "content": _JA_REPLY_HINT},
+                                  {"role": "user", "content": question}]},
+                    config,
+                )
+                # 系统提示已随历史持久化，后续轮次无需重复注入
+            else:
+                result = self._graph.invoke({"messages": [{"role": "user", "content": question}]}, config)
             formatted = self._format_result(result, prev_count)
             try:
                 # 每轮推理后触发压缩检查：阈值内只多一次 get_state，零 LLM 开销；
