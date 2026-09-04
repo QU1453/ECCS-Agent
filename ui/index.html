@@ -1,14 +1,18 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ECCS 智能客服</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ECCS 智能客服</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="/ui/style.css">
 </head>
+
 <body>
 
   <!-- 和纸纹理底 + 顶部暖帘装饰 -->
@@ -30,7 +34,9 @@
 
       <div class="head-actions">
         <button class="icon-btn" id="clearBtn" title="清空对话" data-i18n-title="clearTip" aria-label="清空对话">
-          <svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6.5 7l.8 12h9.4l.8-12"/></svg>
+          <svg viewBox="0 0 24 24">
+            <path d="M4 7h16M9 7V5h6v2M6.5 7l.8 12h9.4l.8-12" />
+          </svg>
         </button>
         <!-- 语言一键切换 -->
         <div class="lang-switch" role="group" aria-label="语言切换 / 言語切替">
@@ -53,13 +59,16 @@
         <div class="composer-ctrl">
           <span class="hint" id="hint" data-i18n="hint">AI 智能体自动接待 · 平均耗时 1.5s</span>
           <button class="btn btn-send" id="sendBtn" type="button" aria-label="发送">
-            <svg viewBox="0 0 24 24"><path d="M4.5 11.5 20 4l-7.5 15.5-2-6-6-2z"/></svg>
+            <svg viewBox="0 0 24 24">
+              <path d="M4.5 11.5 20 4l-7.5 15.5-2-6-6-2z" />
+            </svg>
           </button>
         </div>
       </div>
     </footer>
   </main>
 
-<script src="app.js"></script>
+  <script src="/ui/app.js"></script>
 </body>
+
 </html>
