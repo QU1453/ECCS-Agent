@@ -25,16 +25,7 @@ def recommend_for(keywords: list[str]) -> list[dict]:
 
 
 def recommend_products(keywords: list[str]) -> str:
-    """根据用户需求关键词推荐合适商品。
-
-    何时使用：用户想挑商品、求推荐（如"推荐一款耳机""有没有保温的杯子""哪款充电宝好"）时调用；把用户需求拆成关键词列表传入。
-
-    调用格式（JSON）：
-    {"tool": "recommend_products", "parameters": {"keywords": ["<关键词1，字符串类型>", "<关键词2，字符串类型>"]}}
-
-    参数说明：
-    - keywords：需求关键词数组，字符串数组类型（array of string），例如 ["耳机", "降噪"] 或 ["保温杯"]；没有明确品类时可传 ["推荐"]。
-    """
+    """根据用户需求关键词推荐合适商品。keywords：需求关键词列表，例如 ["耳机", "降噪"]。"""
     items = recommend_for(keywords)
     return json.dumps(
         [{"name": p["name"], "price": p["price"], "feature": p["feature"]} for p in items],

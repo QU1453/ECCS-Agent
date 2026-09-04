@@ -8,11 +8,9 @@ _IMG_TEMPLATE = "https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt
 
 
 def _img(raw_prompt: str) -> str:
-    """商品演示图 URL（按提示词生成的占位图；真实版换商品库图片地址）。"""
     return _IMG_TEMPLATE.format(prompt=quote(raw_prompt))
 
 
-# 演示商品库：code → {code, name, price, img, feature}，真实版对接商品中心 API
 PRODUCTS = {
     "earbuds": {
         "code": "earbuds",

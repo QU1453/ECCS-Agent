@@ -22,10 +22,8 @@ load_dotenv(BASE_DIR / ".env")  # 读取本地密钥配置（已被 .gitignore �
 # API Key：真实密钥只放 .env / 环境变量，代码与仓库中不出现
 API_KEY: str | None = os.getenv("OPENAI_API_KEY", "").strip() or None
 
-# 请求地址：默认智谱 GLM 开放平台（与默认模型 glm-5.3-flash 配套，OpenAI 兼容协议）；
-# 改用 OpenAI 官方时显式设为 https://api.openai.com/v1
-_DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
-BASE_URL: str = os.getenv("OPENAI_BASE_URL", "").strip() or _DEFAULT_BASE_URL
+# 请求地址：OpenAI 官方留空即可；本项目默认智谱 GLM（OpenAI 兼容）
+BASE_URL: str | None = os.getenv("OPENAI_BASE_URL", "").strip() or None
 
 # 模型 ID：本项目默认 GLM-5.3-Flash（智谱开放平台），兼容 OpenAI 协议
 MODEL_ID: str = os.getenv("OPENAI_MODEL", "glm-5.3-flash").strip() or "glm-5.3-flash"

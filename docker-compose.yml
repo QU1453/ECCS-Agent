@@ -1,8 +1,6 @@
 # 一键启动：docker compose up -d --build
 # 密钥：把 OPENAI_API_KEY 写入宿主机 .env（已被 .gitignore / .dockerignore 拦截），
 #       经 compose 注入容器环境变量，不会写进镜像。留空则 Agent 走本地规则兜底。
-# 注意：模型 / 地址的默认值只在 config.py 定义一处（glm-5.3-flash + 智谱），
-#       本文件仅透传环境变量，不自带默认值，避免两边默认值不一致。
 services:
   agent:
     build: .
@@ -13,6 +11,6 @@ services:
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
-      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       SERVER_HOST: 0.0.0.0
     restart: unless-stopped

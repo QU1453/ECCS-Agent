@@ -25,7 +25,6 @@ from pydantic import BaseModel
 
 import config
 from agents import Supervisor, classic_reply
-from memory import agent_session_id, get_short_term
 
 BASE_DIR = Path(__file__).resolve().parent
 HOST, PORT = config.HOST, config.PORT
@@ -54,10 +53,6 @@ class AskRequest(BaseModel):
     session_id: str = "default"
 
 
-class ClearRequest(BaseModel):
-    session_id: str = "default"
-
-
 class AgentService:
     """懒加载单例 Supervisor（多智能体主控）；多轮记忆由 memory/ 的 checkpointer 托管。"""
 
@@ -79,19 +74,6 @@ class AgentService:
             return result
         # 兜底：未配置 Key / Agent 不可用 / 调用异常（单轮，无记忆）
         return classic_reply(message)
-
-    def clear_session(self, session_id: str) -> list[str]:
-        """真清空：清除该会话在全部专职智能体下的 checkpoint 线程与压缩摘要。
-
-        直接操作 checkpointer（不经过 Supervisor），无 Key 兜底模式下同样有效。
-        """
-        stm = get_short_term()
-        cleared = []
-        for name in ("customer_service", "presales"):
-            sid = agent_session_id(name, session_id)
-            stm.clear(sid)  # checkpoint 线程 + 摘要行一并清除
-            cleared.append(sid)
-        return cleared
 
 
 service = AgentService()
@@ -116,15 +98,6 @@ async def ask(req: AskRequest) -> JSONResponse:
         return JSONResponse({"error": "message 不能为空"}, status_code=400)
     reply = service.ask(message, req.session_id)
     return JSONResponse(reply)
-
-
-@app.post("/api/clear")
-async def clear(req: ClearRequest) -> dict:
-    """清空指定会话的后端记忆（前端「清空对话」按钮的真清空实现）。"""
-    sid = req.session_id.strip()
-    if not sid:
-        return JSONResponse({"error": "session_id 不能为空"}, status_code=400)
-    return {"ok": True, "cleared": service.clear_session(sid)}
 
 
 if __name__ == "__main__":
