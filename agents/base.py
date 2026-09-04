@@ -3,8 +3,11 @@
 
 各专职智能体（agents/ 下文件）继承本类，只需提供：
 - system_prompt：本智能体的系统提示词；
-- tools：本智能体可调用的工具列表（来自 tools/ 包）；
-- fallback(question)：无 Key / 调用失败时的本地规则兜底回复。
+- tools：本智能体可调用的工具列表（来自 tools/ 包）。
+
+兜底说明：无 Key / 调用失败时各智能体模块提供模块级兜底函数
+（如 customer_service.classic_reply），由 supervisor / server 调用，
+不走本基类。
 
 通用能力（本类实现）：
 - LLM 初始化与失败降级（无 Key / 未装依赖 / 异常 → 记录 reason，退兜底模式）；

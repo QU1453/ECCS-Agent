@@ -17,8 +17,12 @@ import re
 from .customer_service import CustomerServiceAgent, classic_reply
 from .presales import PreSalesAgent
 
-# 售前导购的路由关键词：命中即分流给 presales，其余默认给客服
-_PRE_SALES_PATTERN = re.compile(r"推荐|想买|哪款|什么好|好物|比价|多少钱|价格|耳机|键盘|保温杯|充电宝|商品")
+# 售前导购的路由关键词：命中即分流给 presales
+# 注意：订单 / 物流 / 售后关键词要放在客服路由里优先判断（见 _route），
+# 避免"订单多少钱""商品什么时候发货"这类混合问句被误分给导购
+_PRE_SALES_PATTERN = re.compile(r"推荐|想买|哪款|什么好|好物|比价|耳机|键盘|保温杯|充电宝")
+# 客服关键词优先级更高：含订单 / 物流 / 售后语义时一律先走客服
+_CS_PATTERN = re.compile(r"物流|快递|到哪|发货|订单|单号|签收|退|换|退款|售后|质量|坏了")
 
 
 class Supervisor:
@@ -58,18 +62,24 @@ class Supervisor:
         由调用方（server）走本地规则兜底。
         """
         name = self._route(question)
-        result = self.specialists[name].answer(question, session_id)
+        # 会话 ID 按智能体隔离（presales:xxx / customer_service:xxx），
+        # 避免两个智能体共享同一 thread_id 导致记忆互相串台
+        result = self.specialists[name].answer(question, session_id=f"{name}:{session_id}")
         if result is None and name != "customer_service":
             # 主选智能体不可用（如未配 Key），退回客服智能体再试一次
-            result = self.customer_service.answer(question, session_id)
+            result = self.customer_service.answer(question, session_id=f"customer_service:{session_id}")
         return result
 
     @staticmethod
     def _route(question: str) -> str:
-        """规则意图路由：售前咨询 → presales；其余（订单/物流/售后/闲聊）→ customer_service。
+        """规则意图路由：订单/物流/售后 → customer_service（优先）；售前咨询 → presales。
 
+        客服关键词优先判断，防止"订单多少钱"这类混合问句被误分给导购；
         后续可替换为 LLM 路由（Roadmap），对外接口不变。
         """
-        if _PRE_SALES_PATTERN.search(question.lower()):
+        s = question.lower()
+        if _CS_PATTERN.search(s):
+            return "customer_service"
+        if _PRE_SALES_PATTERN.search(s):
             return "presales"
         return "customer_service"
