@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import re
 
+from config import MODEL_ID
+
 from .customer_service import CustomerServiceAgent, classic_reply
 from .presales import PreSalesAgent
 
@@ -32,7 +34,7 @@ class Supervisor:
         self,
         api_key: str | None = None,
         base_url: str | None = None,
-        model: str = "gpt-4o-mini",
+        model: str = MODEL_ID,  # 默认值统一来自 config.py（glm-5.3-flash），不在各处硬编码
     ):
         # 专职智能体注册表：新增智能体在此登记
         self.customer_service = CustomerServiceAgent(api_key=api_key, base_url=base_url, model=model)

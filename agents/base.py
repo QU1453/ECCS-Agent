@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+from config import MODEL_ID
 from memory import get_checkpointer, thread_id_for
 from tools import lookup_order, recommend_for
 
@@ -54,7 +55,7 @@ class ReActAgentBase:
         self,
         api_key: str | None,
         base_url: str | None = None,
-        model: str = "gpt-4o-mini",
+        model: str = MODEL_ID,  # 默认值统一来自 config.py（glm-5.3-flash），不在各处硬编码
     ):
         self.model = model
         self.reason = None  # 初始化失败/未配置的原因（供日志展示）
