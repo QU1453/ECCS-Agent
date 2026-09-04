@@ -41,6 +41,16 @@ def thread_id_for(session_id: str) -> str:
     return f"session:{session_id}"
 
 
+def agent_session_id(agent: str, session_id: str) -> str:
+    """复合会话 ID 唯一出口：agent 维度隔离（"customer_service:demo"）。
+
+    约定：推理侧（supervisor）与任何想对接 agent 会话的接入方，
+    一律用本函数生成会话 ID，再交给 thread_id_for/chat_config/MemoryManager，
+    禁止手拼 f"{agent}:{sid}"。
+    """
+    return f"{agent}:{session_id}"
+
+
 _SUMMARY_MARKER = "[早前对话摘要]"  # 回流摘要消息的统一标记（get_history 注入前缀同源）
 
 
@@ -119,7 +129,7 @@ class ShortTermMemory:
     def get_summary(self, session_id: str) -> str:
         """读该会话的滚动摘要；未压缩过返回空串。"""
         row = self._conn.execute(
-            "SELECT summary FROM summaries WHERE thread_id=?", (str(session_id),)
+            "SELECT summary FROM summaries WHERE thread_id=?", (thread_id_for(session_id),)
         ).fetchone()
         return row[0] if row else ""
 
@@ -146,7 +156,7 @@ class ShortTermMemory:
                 "INSERT INTO summaries(thread_id, summary) VALUES(?,?) "
                 "ON CONFLICT(thread_id) DO UPDATE SET summary=excluded.summary,"
                 " updated_at=datetime('now','localtime')",
-                (str(session_id), new_summary),
+                (thread_id_for(session_id), new_summary),
             )
             self._conn.commit()
         # 裁剪 + 摘要回流：一个 checkpoint step 原子提交（先删旧摘要消息再写新摘要）
@@ -172,9 +182,10 @@ class ShortTermMemory:
 
     # ---------- 维护 ----------
     def clear(self, session_id: str) -> None:
-        # thread_id 带命名空间前缀（与 chat_config 一致），否则删不到 checkpoint
+        # thread_id 带命名空间前缀（与 chat_config 一致），否则删不到 checkpoint；
+        # 摘要表主键即 thread_id，与线程同键同删
         self._saver.delete_thread(thread_id_for(session_id))
-        self._conn.execute("DELETE FROM summaries WHERE thread_id=?", (str(session_id),))
+        self._conn.execute("DELETE FROM summaries WHERE thread_id=?", (thread_id_for(session_id),))
         self._conn.commit()
 
     def close(self) -> None:

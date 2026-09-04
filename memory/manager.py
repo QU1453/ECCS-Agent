@@ -27,6 +27,8 @@ class MemoryManager:
         self,
         base_dir: str | Path | None = None,
         *,
+        short_term: ShortTermMemory | None = None,
+        long_term: LongTermMemory | None = None,
         window_size: int = 20,
         compress_threshold: int = 30,
         keep_recent: int = 10,
@@ -41,12 +43,14 @@ class MemoryManager:
         auto_save: bool = True,
     ):
         base = Path(base_dir) if base_dir else Path(__file__).resolve().parent
-        self.short_term = ShortTermMemory(
+        # 实例注入优先（如 get_memory() 复用 get_short_term() 单例，全程单连接）；
+        # 未注入时按 base_dir 自建（原行为不变）
+        self.short_term = short_term or ShortTermMemory(
             base / "short_term" / "data" / "short_term.sqlite",
             window_size=window_size,
             compressor=Compressor(llm=llm, compress_threshold=compress_threshold, keep_recent=keep_recent),
         )
-        self.long_term = LongTermMemory(
+        self.long_term = long_term or LongTermMemory(
             base / "long_term" / "data" / "long_term.sqlite",
             base / "long_term" / "data" / "memories.hnsw",
             provider=embedding_provider or pick_provider(),

@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 
 from config import MODEL_ID
-from memory import get_short_term, thread_id_for
+from memory import get_memory, get_short_term, thread_id_for
 from tools import lookup_order, recommend_for
 
 # ---- 日语识别与回复提示：命中假名即视为日语用户，LLM 回复切换为日语敬体 --------------
@@ -59,6 +59,32 @@ def _build_react_agent(llm, tools, system_prompt: str, checkpointer=None):
         except TypeError:
             continue
     raise TypeError("create_react_agent 参数签名不兼容")
+
+
+def build_memory_context(mm, uid: str, question: str,
+                         fact_limit: int = 10, top_k: int = 3) -> str | None:
+    """组装长期记忆上下文文本（用户事实 + RAG 召回）；无任何数据返回 None（零开销路径）。
+
+    uid 约定：演示期用复合会话 ID（agent_session_id 结果）兜底用户维度，
+    与 MemoryManager.build_context 的回落规则一致；接入账号体系后换成真实 user_id 即可。
+    """
+    try:
+        facts = mm.get_facts(uid)[:fact_limit]
+        recalled = []
+        if mm.long_term.count(uid)["chunks"]:
+            recalled = mm.recall(uid, question, top_k=top_k)
+        if not facts and not recalled:
+            return None
+        lines = []
+        if facts:
+            kv = "；".join(f"{f['key']}={f['value']}" for f in facts)
+            lines.append(f"[用户事实] {kv}")
+        if recalled:
+            hits = " / ".join(f"『{r['title'] or '知识'}』{r['text'][:80]}" for r in recalled)
+            lines.append(f"[相关知识] {hits}")
+        return ("以下是该用户的长期记忆，回答时可作为事实依据（不得虚构）；\n" + "\n".join(lines))
+    except Exception:  # noqa: BLE001 - 长期记忆故障不影响本轮推理
+        return None
 
 
 class ReActAgentBase:
@@ -110,20 +136,23 @@ class ReActAgentBase:
             return None
         try:
             config = {"configurable": {"thread_id": thread_id_for(session_id)}}
+            # 本轮输入前缀注入两类系统上下文（均为空时退化为纯用户消息）：
+            # 1) 长期记忆（用户事实 + RAG 召回）——无长期数据/hnswlib 不可用时为零开销路径；
+            # 2) 日语提示（含假名即视为日语用户，要求本轮及后续以日语敬体回复；
+            #    提示已随历史持久化，后续轮次无需重复注入）
+            messages = []
+            mm = get_memory()
+            ctx = build_memory_context(mm, session_id, question) if mm is not None else None
+            if ctx:
+                messages.append({"role": "system", "content": ctx})
+            if is_japanese(question):
+                messages.append({"role": "system", "content": _JA_REPLY_HINT})
+            messages.append({"role": "user", "content": question})
             # 记录本轮前的消息数：invoke 返回的是整条 thread 的全量消息，
             # 卡片提取只看本轮新增部分，避免把旧轮工具调用误当卡片
             state = self._graph.get_state(config)
             prev_count = len(state.values.get("messages", [])) if (state and state.values) else 0
-            # 日语用户：注入一条系统提示，要求本轮及后续以日语敬体回复（中文/英文不受影响）
-            if is_japanese(question):
-                result = self._graph.invoke(
-                    {"messages": [{"role": "system", "content": _JA_REPLY_HINT},
-                                  {"role": "user", "content": question}]},
-                    config,
-                )
-                # 系统提示已随历史持久化，后续轮次无需重复注入
-            else:
-                result = self._graph.invoke({"messages": [{"role": "user", "content": question}]}, config)
+            result = self._graph.invoke({"messages": messages}, config)
             formatted = self._format_result(result, prev_count)
             try:
                 # 每轮推理后触发压缩检查：阈值内只多一次 get_state，零 LLM 开销；

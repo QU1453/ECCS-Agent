@@ -10,7 +10,13 @@
 兼容层（保持 agents/ 原有用法不变）：
 - get_short_term(llm=None)：进程级单例短期记忆（含压缩器，llm 优先由接入方注入）；
 - get_checkpointer()：进程级单例 checkpointer（由 MemorySaver 升级为 SQLite 持久化 SqliteSaver）；
+- agent_session_id(agent, session_id)：复合会话 ID 唯一出口（"customer_service:sid"）；
 - thread_id_for(session_id)：会话 ID → 线程命名空间（"session:{id}"）。
+
+会话 ID 约定（唯一出口，禁止手拼）：
+  agent_session_id("customer_service", sid)  → "customer_service:sid"         # agent 维度隔离
+  thread_id_for(会话ID)                       → "session:customer_service:sid"  # checkpoint 线程
+  MemoryManager.add_message/get_history/chat_config 直接传 agent_session_id(...) 的结果。
 
 快速上手：
 
@@ -54,7 +60,7 @@ except ImportError as _lt_exc:  # pragma: no cover - Windows 无 C++ 编译环�
         "短期记忆不受影响；如需长期记忆 / RAG，请安装 Visual C++ Build Tools 后 "
         "pip install hnswlib，或改用 Linux / Docker 环境。"
     )
-from .short_term import thread_id_for
+from .short_term import agent_session_id, thread_id_for
 from .short_term.compress import Compressor
 
 __all__ = [
@@ -67,7 +73,9 @@ __all__ = [
     "OpenAIEmbeddingProvider",
     "get_checkpointer",
     "get_short_term",
+    "get_memory",
     "thread_id_for",
+    "agent_session_id",
     "HAS_LONG_TERM",
 ]
 
@@ -113,3 +121,26 @@ def get_short_term(llm=None):
 def get_checkpointer():
     """兼容旧 API：进程级单例 checkpointer（现升级为 SQLite 持久化的 SqliteSaver）。"""
     return get_short_term().saver
+
+
+_memory = None  # 进程级 MemoryManager 单例（推理侧读长期记忆用）
+
+
+def get_memory(llm=None, embedding_provider=None) -> MemoryManager | None:
+    """进程级 MemoryManager 单例：推理侧经它读取长期记忆（facts / recall）。
+
+    短期记忆与 get_short_term() 同源单例（同 saver/同连接，全程单连接）；
+    长期嵌入按环境选择：有 OPENAI_API_KEY → OpenAI 兼容，否则 Hash 降级。
+    hnswlib 不可用（HAS_LONG_TERM=False）时返回 None，调用方按无长期记忆处理。
+    """
+    global _memory
+    if _memory is None:
+        if MemoryManager is None:  # hnswlib 不可用：长期记忆降级，推理侧跳过注入
+            return None
+        from .long_term.rag import pick_provider
+
+        _memory = MemoryManager(
+            short_term=get_short_term(llm=llm),
+            embedding_provider=embedding_provider or pick_provider(),
+        )
+    return _memory
