@@ -27,14 +27,33 @@
 import os
 from pathlib import Path
 
-from .long_term.ann import AnnIndex
-from .long_term.chunker import chunk_text
-from .long_term.rag import (
-    EmbeddingProvider,
-    HashEmbeddingProvider,
-    OpenAIEmbeddingProvider,
-)
-from .manager import MemoryManager
+# ---- 长期记忆为可选依赖：hnswlib 在 Windows 无预编译包，装不上时降级为"仅短期记忆" ----
+# 短期记忆（SqliteSaver + 压缩）不依赖 hnswlib，agents/ 的核心链路不受影响；
+# 需要长期记忆 / RAG 时：安装 VC++ Build Tools 后 pip install hnswlib，或改用 Linux / Docker。
+try:
+    from .long_term.ann import AnnIndex
+    from .long_term.chunker import chunk_text
+    from .long_term.rag import (
+        EmbeddingProvider,
+        HashEmbeddingProvider,
+        OpenAIEmbeddingProvider,
+    )
+    from .manager import MemoryManager
+
+    HAS_LONG_TERM = True  # hnswlib 可用，长期记忆功能完整
+except ImportError as _lt_exc:  # pragma: no cover - Windows 无 C++ 编译环境时
+    AnnIndex = None
+    chunk_text = None
+    EmbeddingProvider = None
+    HashEmbeddingProvider = None
+    OpenAIEmbeddingProvider = None
+    MemoryManager = None
+    HAS_LONG_TERM = False
+    _LONG_TERM_HINT = (
+        f"长期记忆不可用（导入失败：{_lt_exc}）。"
+        "短期记忆不受影响；如需长期记忆 / RAG，请安装 Visual C++ Build Tools 后 "
+        "pip install hnswlib，或改用 Linux / Docker 环境。"
+    )
 from .short_term import thread_id_for
 from .short_term.compress import Compressor
 
@@ -49,6 +68,7 @@ __all__ = [
     "get_checkpointer",
     "get_short_term",
     "thread_id_for",
+    "HAS_LONG_TERM",
 ]
 
 _compat_stm = None  # 兼容层懒加载单例（只建短期记忆，长期记忆按需另建 MemoryManager）
