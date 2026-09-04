@@ -70,12 +70,13 @@ class Supervisor:
         由调用方（server）走本地规则兜底。
         """
         name = self._route(question)
-        # 会话 ID 按智能体隔离（presales:xxx / customer_service:xxx），
-        # 避免两个智能体共享同一 thread_id 导致记忆互相串台
-        result = self.specialists[name].answer(question, session_id=f"{name}:{session_id}")
+        # 同一会话共享 thread_id：顾客的一次会话是一条完整对话线，
+        # 跨智能体追问（先推荐→再问价格）时上下文自动衔接；
+        # 会话隔离由 thread_id 本身（session:{id}）保证，不同顾客互不可见
+        result = self.specialists[name].answer(question, session_id=session_id)
         if result is None and name != "customer_service":
             # 主选智能体不可用（如未配 Key），退回客服智能体再试一次
-            result = self.customer_service.answer(question, session_id=f"customer_service:{session_id}")
+            result = self.customer_service.answer(question, session_id=session_id)
         return result
 
     @staticmethod
