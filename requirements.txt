@@ -5,6 +5,8 @@ uvicorn>=0.30
 langgraph>=0.2.0
 langchain-openai>=0.2.0
 python-dotenv>=1.0
+langgraph-checkpoint-sqlite>=2.0.0
+hnswlib>=0.8.0
 
 # 桌面版（可选，运行 main.py 时再装）：
 # pywebview>=5.0
