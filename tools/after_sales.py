@@ -25,7 +25,17 @@ def register_return(order_no: str, reason: str) -> dict:
 
 
 def handle_return(order_no: str, reason: str = "") -> str:
-    """办理退换货 / 退款：登记售后单并给出可选方案。order_no：订单号；reason：退货原因。"""
+    """办理退换货 / 退款：登记售后单并给出可选方案。
+
+    何时使用：用户想退货、换货、退款、报质量问题、商品坏了需要售后时调用；仅做意向咨询而未确认办理时，可先说明政策再调用本工具登记。
+
+    调用格式（JSON）：
+    {"tool": "handle_return", "parameters": {"order_no": "<订单号，字符串类型>", "reason": "<退货原因，字符串类型，可省略，默认空字符串>"}}
+
+    参数说明：
+    - order_no：订单号，字符串类型（string），例如 "2026081200012"，用户消息中形如 2026xxxxxxxx 的连续数字。
+    - reason：退货原因，字符串类型（string），可省略；用户未说明时传空字符串 ""。
+    """
     r = register_return(order_no, reason)
     return json.dumps(
         {
