@@ -132,11 +132,13 @@ class ReActAgentBase:
         """LLM 模式是否可用。"""
         return self._graph is not None
 
-    def answer(self, question: str, session_id: str = "default") -> dict | None:
+    def answer(self, question: str, session_id: str = "default", lang: str = "zh") -> dict | None:
         """调用 LLM Agent，返回 {reply, intent, data}；失败返回 None（交由兜底）。
 
         多轮记忆：checkpointer 按 thread_id（= session_id）自动携带历史上下文，
         无需手动拼接 history。
+        lang：前端界面语言（"zh" / "ja"），显式指定日语时即使输入不含假名
+        也切换日语回复（与输入假名检测取并集，逐轮生效、历史零残留）。
         """
         if not self.available:
             return None
@@ -144,12 +146,13 @@ class ReActAgentBase:
             config = {"configurable": {"thread_id": thread_id_for(session_id)}}
             # 每轮重建动态系统上下文（经 _dynamic_prompt 组装，不落 checkpoint 历史）：
             # 1) 长期记忆（用户事实 + RAG 召回）——空库/hnswlib 不可用时为零开销路径；
-            # 2) 日语提示（含假名即视为日语用户；按当前输入语言逐轮生效，历史零残留）
+            # 2) 日语提示（前端 lang=ja 或输入含假名即视为日语用户；逐轮生效）
             mm = get_memory()
             ctx = build_memory_context(mm, session_id, question) if mm is not None else None
+            ja = (lang == "ja") or is_japanese(question)
             self._dynamic_system = (
                 ([ctx] if ctx else [])
-                + ([_JA_REPLY_HINT] if is_japanese(question) else [])
+                + ([_JA_REPLY_HINT] if ja else [])
             )
             # 记录本轮前的消息数：invoke 返回的是整条 thread 的全量消息，
             # 卡片提取只看本轮新增部分，避免把旧轮工具调用误当卡片

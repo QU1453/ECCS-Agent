@@ -49,18 +49,35 @@ class CustomerServiceAgent(ReActAgentBase):
 # ============================================================================
 # 本地兜底路由：未配置 Key / 后端异常时，给出与前端演示一致的体验
 # ============================================================================
-def classic_reply(q: str) -> dict:
-    """关键词路由 + 结构化卡片数据，返回 {reply, intent, data}（日语用户回复日语敬体）。"""
+# 日语文案本地化：订单演示数据（tools/order.py）为中文，拼进日语回复前先转换
+# （卡片数据的本地化由前端 app.js 的 localize() 负责，与这里口径一致）
+_JA_TEXT = {
+    "广州转运中心": "広州転送センター",
+    "明天 18:00 前送达": "明日 18:00 まで",
+}
+
+
+def _ja(text: str) -> str:
+    return _JA_TEXT.get(text, text)
+
+
+def classic_reply(q: str, lang: str = "zh") -> dict:
+    """关键词路由 + 结构化卡片数据，返回 {reply, intent, data}（日语用户回复日语敬体）。
+
+    lang：前端界面语言（"zh" / "ja"），显式指定日语时即使输入不含假名
+    也切换日语敬体文案（卡片数据由前端 localize 处理）。
+    """
     s = q.lower()
-    ja = is_japanese(q)  # 日语用户：回复文案切换为日语敬体（卡片数据由前端 localize 处理）
+    # 日语用户（前端 lang=ja 或输入含假名）：回复文案切换为日语敬体
+    ja = (lang == "ja") or is_japanese(q)
 
     # 分支关键词中日双语（日语用户经上面 ja 分支回复日语敬体）
     if re.search(r"物流|快递|到哪|发货|订单|单号|签收|配送|荷物|注文|追跡|届く|輸送", s):
         order = lookup_order("2026081200012")
         if ja:
             reply = (
-                f"お客様のご注文は現在 <span class='em'>「{order['location']}」</span> にございます。"
-                f"{order['eta']}に到着予定でございます。配達時にはSMSでお知らせいたします～"
+                f"お客様のご注文は現在 <span class='em'>「{_ja(order['location'])}」</span> にございます。"
+                f"{_ja(order['eta'])}に到着予定でございます。配達時にはSMSでお知らせいたします～"
             )
         else:
             reply = (
@@ -89,7 +106,7 @@ def classic_reply(q: str) -> dict:
         # 推荐类兜底：委托给售前导购的兜底逻辑，保持口径一致
         from .presales import classic_presales_reply
 
-        return classic_presales_reply(q)
+        return classic_presales_reply(q, lang=lang)
 
     if re.search(r"在吗|你好|哈喽|hi|hello|こんにちは", s):
         if ja:

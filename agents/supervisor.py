@@ -64,19 +64,24 @@ class Supervisor:
     def model(self) -> str:
         return self.customer_service.model
 
-    def answer(self, question: str, session_id: str = "default") -> dict | None:
+    def answer(self, question: str, session_id: str = "default", lang: str = "zh") -> dict | None:
         """按意图路由到专职智能体作答；多轮记忆由 memory/ 的 checkpointer 托管。
 
+        lang 为前端界面语言（"zh" / "ja"），透传给智能体控制回复语言。
         被选智能体不可用 / 失败时，退而尝试客服智能体；仍失败返回 None，
         由调用方（server）走本地规则兜底。
         """
         name = self._route(question)
         # 会话 ID 按智能体隔离（presales:xxx / customer_service:xxx，经 agent_session_id
         # 唯一出口生成），避免两个智能体共享同一 thread_id 导致记忆互相串台
-        result = self.specialists[name].answer(question, session_id=agent_session_id(name, session_id))
+        result = self.specialists[name].answer(
+            question, session_id=agent_session_id(name, session_id), lang=lang
+        )
         if result is None and name != "customer_service":
             # 主选智能体不可用（如未配 Key），退回客服智能体再试一次
-            result = self.customer_service.answer(question, session_id=agent_session_id("customer_service", session_id))
+            result = self.customer_service.answer(
+                question, session_id=agent_session_id("customer_service", session_id), lang=lang
+            )
         return result
 
     @staticmethod

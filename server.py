@@ -47,6 +47,7 @@ app.mount("/ui", StaticFiles(directory=BASE_DIR / "ui"), name="ui")
 class AskRequest(BaseModel):
     message: str
     session_id: str = "default"
+    lang: str = "zh"  # 前端界面语言："zh" 中文 / "ja" 日文，透传给智能体控制回复语言
 
 
 class ClearRequest(BaseModel):
@@ -66,14 +67,14 @@ class AgentService:
             )
         return self._supervisor
 
-    def ask(self, message: str, session_id: str) -> dict:
+    def ask(self, message: str, session_id: str, lang: str = "zh") -> dict:
         sup = self.supervisor()
         # 真实 LLM：多轮记忆 = LangGraph MemorySaver 按 thread_id(session_id) 隔离
-        result = sup.answer(message, session_id) if sup.available else None
+        result = sup.answer(message, session_id, lang=lang) if sup.available else None
         if result and result.get("reply"):
             return result
         # 兜底：未配置 Key / Agent 不可用 / 调用异常（单轮，无记忆）
-        return classic_reply(message)
+        return classic_reply(message, lang=lang)
 
     def clear_session(self, session_id: str) -> list[str]:
         """真清空：清除该会话在全部专职智能体下的 checkpoint 线程与压缩摘要。
@@ -109,7 +110,7 @@ async def ask(req: AskRequest) -> JSONResponse:
     message = req.message.strip()
     if not message:
         return JSONResponse({"error": "message 不能为空"}, status_code=400)
-    reply = service.ask(message, req.session_id)
+    reply = service.ask(message, req.session_id, lang=req.lang)
     return JSONResponse(reply)
 
 
