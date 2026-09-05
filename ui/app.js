@@ -135,11 +135,22 @@ function localAnswer(q) {
 }
 
 /* ---------- 后端桥接：窗口输入 → Python Agent（/api/ask） ---------- */
+/* 会话 ID：浏览器维度持久化（localStorage），替代写死的 "demo"，多用户互不串台 */
+const SID_KEY = "eccs-sid";
+function sessionId() {
+  let sid = localStorage.getItem(SID_KEY);
+  if (!sid) {
+    sid = (crypto.randomUUID ? crypto.randomUUID() : `s-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    localStorage.setItem(SID_KEY, sid);
+  }
+  return sid;
+}
+
 async function askBackend(q) {
   const res = await fetch("/api/ask", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message: q, session_id: "demo", lang })
+    body: JSON.stringify({ message: q, session_id: sessionId(), lang })
   });
   if (!res.ok) return null;
   const j = await res.json();
@@ -220,6 +231,12 @@ input.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) {
 input.addEventListener("input", () => autoGrow(input));
 $$(".quick").forEach(b => b.addEventListener("click", () => { input.value = L()[b.dataset.qKey]; autoGrow(input); send(); }));
 $("#clearBtn").addEventListener("click", () => {
+  // 真清空：后端删除该会话的 checkpoint 线程与摘要；后端不可达时仅本地清空（不阻塞）
+  fetch("/api/clear", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId() })
+  }).catch(() => {});
   msgs.innerHTML = "";
   addMsg("ai", L().cleared);
 });

@@ -14,6 +14,7 @@ import hashlib
 import os
 import re
 import sqlite3
+import zlib
 from abc import ABC, abstractmethod
 from array import array
 
@@ -49,7 +50,11 @@ class EmbeddingProvider(ABC):
 
 
 class HashEmbeddingProvider(EmbeddingProvider):
-    """本地确定性降级：hash 词袋 + L2 归一化。演示管道用，语义质量有限。"""
+    """本地确定性降级：稳定哈希词袋 + L2 归一化。演示管道用，语义质量有限。
+
+    注意用 zlib.crc32 而非内建 hash()：内建 hash 受 PYTHONHASHSEED 进程随机化
+    影响，跨进程/跨运行的 token→桶 映射不同，会导致召回质量测试偶发漂移。
+    """
 
     def __init__(self, dim: int = 256):
         self._dim = dim
@@ -59,12 +64,12 @@ class HashEmbeddingProvider(EmbeddingProvider):
         return self._dim
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        """词袋哈希向量（token → 桶计数 → L2 归一化）；确定性、零网络依赖。"""
+        """词袋稳定哈希向量（token → 桶计数 → L2 归一化）；跨进程确定性、零网络依赖。"""
         out = []
         for t in texts:
             v = [0.0] * self._dim
             for tok in _TOKEN_RE.findall((t or "").lower()):
-                v[hash(tok) % self._dim] += 1.0
+                v[zlib.crc32(tok.encode("utf-8")) % self._dim] += 1.0
             norm = sum(x * x for x in v) ** 0.5 or 1.0
             out.append([x / norm for x in v])
         return out

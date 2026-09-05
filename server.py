@@ -19,12 +19,13 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import config
 from agents import Supervisor, classic_reply
+from memory import agent_session_id, get_short_term
 
 BASE_DIR = Path(__file__).resolve().parent
 HOST, PORT = config.HOST, config.PORT
@@ -39,17 +40,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 同一端口托管前端页面
+# 同一端口托管前端页面：/ui 前缀与根路径均可访问
 app.mount("/ui", StaticFiles(directory=BASE_DIR / "ui"), name="ui")
-
-
-@app.get("/")
-async def index() -> FileResponse:
-    return FileResponse(BASE_DIR / "ui" / "index.html")
 
 
 class AskRequest(BaseModel):
     message: str
+    session_id: str = "default"
+    lang: str = "zh"  # 前端界面语言："zh" 中文 / "ja" 日文，透传给智能体控制回复语言
+
+
+class ClearRequest(BaseModel):
     session_id: str = "default"
 
 
@@ -66,14 +67,27 @@ class AgentService:
             )
         return self._supervisor
 
-    def ask(self, message: str, session_id: str) -> dict:
+    def ask(self, message: str, session_id: str, lang: str = "zh") -> dict:
         sup = self.supervisor()
         # 真实 LLM：多轮记忆 = LangGraph MemorySaver 按 thread_id(session_id) 隔离
-        result = sup.answer(message, session_id) if sup.available else None
+        result = sup.answer(message, session_id, lang=lang) if sup.available else None
         if result and result.get("reply"):
             return result
         # 兜底：未配置 Key / Agent 不可用 / 调用异常（单轮，无记忆）
-        return classic_reply(message)
+        return classic_reply(message, lang=lang)
+
+    def clear_session(self, session_id: str) -> list[str]:
+        """真清空：清除该会话在全部专职智能体下的 checkpoint 线程与压缩摘要。
+
+        直接操作 checkpointer（不经过 Supervisor），无 Key 兜底模式下同样有效。
+        """
+        stm = get_short_term()
+        cleared = []
+        for name in ("customer_service", "presales"):
+            sid = agent_session_id(name, session_id)
+            stm.clear(sid)  # checkpoint 线程 + 摘要行一并清除
+            cleared.append(sid)
+        return cleared
 
 
 service = AgentService()
@@ -96,8 +110,22 @@ async def ask(req: AskRequest) -> JSONResponse:
     message = req.message.strip()
     if not message:
         return JSONResponse({"error": "message 不能为空"}, status_code=400)
-    reply = service.ask(message, req.session_id)
+    reply = service.ask(message, req.session_id, lang=req.lang)
     return JSONResponse(reply)
+
+
+@app.post("/api/clear")
+async def clear(req: ClearRequest) -> dict:
+    """清空指定会话的后端记忆（前端「清空对话」按钮的真清空实现）。"""
+    sid = req.session_id.strip()
+    if not sid:
+        return JSONResponse({"error": "session_id 不能为空"}, status_code=400)
+    return {"ok": True, "cleared": service.clear_session(sid)}
+
+
+# 根路径挂载静态页（必须放在所有 API 路由之后，避免吞掉 /api/*）：
+# html=True 使 "/" 自动返回 index.html；style.css / app.js 等相对引用同源生效
+app.mount("/", StaticFiles(directory=BASE_DIR / "ui", html=True), name="root")
 
 
 if __name__ == "__main__":

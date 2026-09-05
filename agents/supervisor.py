@@ -15,16 +15,23 @@ from __future__ import annotations
 import re
 
 from config import MODEL_ID
+from memory import agent_session_id
 
 from .customer_service import CustomerServiceAgent, classic_reply
 from .presales import PreSalesAgent
 
-# 售前导购的路由关键词：命中即分流给 presales
+# 售前导购的路由关键词（中日双语）：命中即分流给 presales
 # 注意：订单 / 物流 / 售后关键词要放在客服路由里优先判断（见 _route），
 # 避免"订单多少钱""商品什么时候发货"这类混合问句被误分给导购
-_PRE_SALES_PATTERN = re.compile(r"推荐|想买|哪款|什么好|好物|比价|耳机|键盘|保温杯|充电宝")
-# 客服关键词优先级更高：含订单 / 物流 / 售后语义时一律先走客服
-_CS_PATTERN = re.compile(r"物流|快递|到哪|发货|订单|单号|签收|退|换|退款|售后|质量|坏了")
+_PRE_SALES_PATTERN = re.compile(
+    r"推荐|想买|哪款|什么好|好物|比价|耳机|键盘|保温杯|充电宝"
+    r"|おすすめ|推薦|薦め|どれ|いくら|価格|値段|商品案内|イヤホン|ヘッドホン|キーボード|マグボトル|水筒|バッテリー"
+)
+# 客服关键词优先级更高（中日双语）：含订单 / 物流 / 售后语义时一律先走客服
+_CS_PATTERN = re.compile(
+    r"物流|快递|到哪|发货|订单|单号|签收|退|换|退款|售后|质量|坏了"
+    r"|配送|荷物|注文|追跡|届く|返品|交換|返金|キャンセル|不良"
+)
 
 
 class Supervisor:
@@ -57,19 +64,24 @@ class Supervisor:
     def model(self) -> str:
         return self.customer_service.model
 
-    def answer(self, question: str, session_id: str = "default") -> dict | None:
+    def answer(self, question: str, session_id: str = "default", lang: str = "zh") -> dict | None:
         """按意图路由到专职智能体作答；多轮记忆由 memory/ 的 checkpointer 托管。
 
+        lang 为前端界面语言（"zh" / "ja"），透传给智能体控制回复语言。
         被选智能体不可用 / 失败时，退而尝试客服智能体；仍失败返回 None，
         由调用方（server）走本地规则兜底。
         """
         name = self._route(question)
-        # 会话 ID 按智能体隔离（presales:xxx / customer_service:xxx），
-        # 避免两个智能体共享同一 thread_id 导致记忆互相串台
-        result = self.specialists[name].answer(question, session_id=f"{name}:{session_id}")
+        # 会话 ID 按智能体隔离（presales:xxx / customer_service:xxx，经 agent_session_id
+        # 唯一出口生成），避免两个智能体共享同一 thread_id 导致记忆互相串台
+        result = self.specialists[name].answer(
+            question, session_id=agent_session_id(name, session_id), lang=lang
+        )
         if result is None and name != "customer_service":
             # 主选智能体不可用（如未配 Key），退回客服智能体再试一次
-            result = self.customer_service.answer(question, session_id=f"customer_service:{session_id}")
+            result = self.customer_service.answer(
+                question, session_id=agent_session_id("customer_service", session_id), lang=lang
+            )
         return result
 
     @staticmethod

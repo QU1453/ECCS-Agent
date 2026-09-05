@@ -16,9 +16,26 @@
 """
 from __future__ import annotations
 
+import re
+
 from config import MODEL_ID
-from memory import get_short_term, thread_id_for
+from memory import get_memory, get_short_term, thread_id_for
 from tools import lookup_order, recommend_for
+
+# ---- 日语识别与回复提示：命中假名即视为日语用户，LLM 回复切换为日语敬体 --------------
+_JA_RE = re.compile(r"[\u3040-\u309f\u30a0-\u30ff]")  # 平假名 / 片假名
+# 仅汉字无法区分中日（如"注文"），假名是日语的强特征；纯中文/英文不命中
+_JA_REPLY_HINT = (
+    "本次对话用户使用日语。请用日语回复，并遵守日本电商客服敬语规范：\n"
+    "- 全程使用丁寧語・敬語（です・ます調），称呼顾客为「お客様」；\n"
+    "- 常用服务用语：「かしこまりました」「恐れ入りますが」「お問い合わせいただきありがとうございます」；\n"
+    "- 金额用「円」、日期用日本书写习惯；专有名词（商品名、配送公司）保持原文。"
+)
+
+
+def is_japanese(text: str) -> bool:
+    """是否日语用户输入（含假名即视为日语；供 LLM 提示与兜底双语回复共用）。"""
+    return bool(_JA_RE.search(text or ""))
 
 # ---- LangGraph 相关为可选依赖：装不上也能以"本地兜底模式"运行 -------------------
 try:
@@ -32,16 +49,46 @@ except Exception:  # pragma: no cover - 离线环境 / 未安装依赖时
     ChatOpenAI = None
 
 
-def _build_react_agent(llm, tools, system_prompt: str, checkpointer=None):
-    """兼容不同 langgraph 版本：1.x 用 prompt=，旧版用 messages_modifier/state_modifier=。"""
+def _build_react_agent(llm, tools, prompt, checkpointer=None):
+    """兼容不同 langgraph 版本：1.x 用 prompt=，旧版用 messages_modifier/state_modifier=。
+
+    prompt 可为 str 或 callable：callable 接收当前 state（dict 或消息列表，视版本而定），
+    返回完整模型输入消息列表（固定系统提示 + 每轮动态上下文 + 历史消息）。
+    """
     for prompt_kw in ("prompt", "messages_modifier", "state_modifier"):
         try:
             return create_react_agent(
-                model=llm, tools=tools, checkpointer=checkpointer, **{prompt_kw: system_prompt}
+                model=llm, tools=tools, checkpointer=checkpointer, **{prompt_kw: prompt}
             )
         except TypeError:
             continue
     raise TypeError("create_react_agent 参数签名不兼容")
+
+
+def build_memory_context(mm, uid: str, question: str,
+                         fact_limit: int = 10, top_k: int = 3) -> str | None:
+    """组装长期记忆上下文文本（用户事实 + RAG 召回）；无任何数据返回 None（零开销路径）。
+
+    uid 约定：演示期用复合会话 ID（agent_session_id 结果）兜底用户维度，
+    与 MemoryManager.build_context 的回落规则一致；接入账号体系后换成真实 user_id 即可。
+    """
+    try:
+        facts = mm.get_facts(uid)[:fact_limit]
+        recalled = []
+        if mm.long_term.count(uid)["chunks"]:
+            recalled = mm.recall(uid, question, top_k=top_k)
+        if not facts and not recalled:
+            return None
+        lines = []
+        if facts:
+            kv = "；".join(f"{f['key']}={f['value']}" for f in facts)
+            lines.append(f"[用户事实] {kv}")
+        if recalled:
+            hits = " / ".join(f"『{r['title'] or '知识'}』{r['text'][:80]}" for r in recalled)
+            lines.append(f"[相关知识] {hits}")
+        return ("以下是该用户的长期记忆，回答时可作为事实依据（不得虚构）；\n" + "\n".join(lines))
+    except Exception:  # noqa: BLE001 - 长期记忆故障不影响本轮推理
+        return None
 
 
 class ReActAgentBase:
@@ -61,6 +108,7 @@ class ReActAgentBase:
         self.reason = None  # 初始化失败/未配置的原因（供日志展示）
         self._graph = None
         self._stm = None    # 进程级单例短期记忆（压缩与推理共享同一 saver）
+        self._dynamic_system: list[str] = []  # 每轮推理前重建的动态系统上下文（不落 checkpoint）
         if not api_key:
             self.reason = "未配置 OPENAI_API_KEY，运行于本地规则兜底模式"
             return
@@ -70,10 +118,11 @@ class ReActAgentBase:
         try:
             llm = ChatOpenAI(model=model, api_key=api_key, base_url=base_url or None, temperature=0.3)
             # 多轮记忆：memory/ 提供的 checkpointer 按 thread_id 隔离会话；
-            # 压缩器注入同一 llm，超阈值裁剪时滚动摘要会回流进线程（不丢上下文）
+            # 压缩器注入同一 llm，超阈值裁剪时滚动摘要会回流进线程（不丢上下文）；
+            # prompt 用动态 callable：长期记忆/日语提示每轮重建，不进 checkpoint 历史
             self._stm = get_short_term(llm=llm)
             self._graph = _build_react_agent(
-                llm, self.tools, self.system_prompt, checkpointer=self._stm.saver
+                llm, self.tools, self._dynamic_prompt, checkpointer=self._stm.saver
             )
         except Exception as exc:  # noqa: BLE001
             self.reason = f"Agent 初始化失败（{exc.__class__.__name__}: {exc}）"
@@ -83,16 +132,28 @@ class ReActAgentBase:
         """LLM 模式是否可用。"""
         return self._graph is not None
 
-    def answer(self, question: str, session_id: str = "default") -> dict | None:
+    def answer(self, question: str, session_id: str = "default", lang: str = "zh") -> dict | None:
         """调用 LLM Agent，返回 {reply, intent, data}；失败返回 None（交由兜底）。
 
         多轮记忆：checkpointer 按 thread_id（= session_id）自动携带历史上下文，
         无需手动拼接 history。
+        lang：前端界面语言（"zh" / "ja"），显式指定日语时即使输入不含假名
+        也切换日语回复（与输入假名检测取并集，逐轮生效、历史零残留）。
         """
         if not self.available:
             return None
         try:
             config = {"configurable": {"thread_id": thread_id_for(session_id)}}
+            # 每轮重建动态系统上下文（经 _dynamic_prompt 组装，不落 checkpoint 历史）：
+            # 1) 长期记忆（用户事实 + RAG 召回）——空库/hnswlib 不可用时为零开销路径；
+            # 2) 日语提示（前端 lang=ja 或输入含假名即视为日语用户；逐轮生效）
+            mm = get_memory()
+            ctx = build_memory_context(mm, session_id, question) if mm is not None else None
+            ja = (lang == "ja") or is_japanese(question)
+            self._dynamic_system = (
+                ([ctx] if ctx else [])
+                + ([_JA_REPLY_HINT] if ja else [])
+            )
             # 记录本轮前的消息数：invoke 返回的是整条 thread 的全量消息，
             # 卡片提取只看本轮新增部分，避免把旧轮工具调用误当卡片
             state = self._graph.get_state(config)
@@ -108,6 +169,24 @@ class ReActAgentBase:
             return formatted
         except Exception:  # noqa: BLE001 - 网络/额度/格式异常都交给兜底
             return None
+
+    def _dynamic_prompt(self, state):
+        """动态 prompt：固定系统提示 + 每轮最新动态上下文 + 历史消息。
+
+        create_react_agent 每次调用模型前都会执行本 callable，因此上下文永远取
+        当前数据（长期记忆/日语提示），历史 checkpoint 中不留任何注入残留。
+        兼容不同版本的 callable 签名：state 可能为 dict（prompt=）或消息列表
+        （messages_modifier/state_modifier=）。
+        """
+        from langchain_core.messages import SystemMessage  # 延迟导入：仅 graph 存在时才会调用
+
+        msgs = state.get("messages", []) if isinstance(state, dict) else list(state)
+        out: list = []
+        if self.system_prompt:
+            out.append(SystemMessage(content=self.system_prompt))
+        out.extend(SystemMessage(content=t) for t in self._dynamic_system)
+        out.extend(msgs)
+        return out
 
     # ---------- 内部：把 Agent 运行结果整理为结构化回复 ----------
     @staticmethod
