@@ -14,8 +14,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import config  # 记忆参数槽位（SKILL_HOT_INJECT_TOP 等）
+
 from .long_term.memory import LongTermMemory
 from .long_term.rag import pick_provider
+from .knowledge import KnowledgeBase
 from .short_term.compress import Compressor
 from .short_term.memory import ShortTermMemory
 
@@ -29,6 +32,9 @@ class MemoryManager:
         *,
         short_term: ShortTermMemory | None = None,
         long_term: LongTermMemory | None = None,
+        knowledge: KnowledgeBase | None = None,
+        state: "object | None" = None,
+        skill: "object | None" = None,
         window_size: int = 20,
         compress_threshold: int = 30,
         keep_recent: int = 10,
@@ -62,6 +68,100 @@ class MemoryManager:
             overfetch=ann_overfetch,
             auto_save=auto_save,
         )
+        # 知识库 / 状态记忆 / 技能记忆：独立 SQLite（memory/data/ 下），
+        # 均可注入实例（复用连接）；未注入时按 base_dir 懒加载（见 state / skill 属性）
+        self._base = base
+        self.knowledge = knowledge or KnowledgeBase(base / "data", llm=llm, chunk_size=chunk_size)
+        self._state = state
+        self._skill = skill
+
+    @property
+    def state(self):
+        """状态记忆（死规则）懒加载单例（P5 提供）。"""
+        if self._state is None:
+            from .state.memory import StateMemory
+
+            self._state = StateMemory(self._base / "data")
+        return self._state
+
+    @property
+    def skill(self):
+        """技能记忆（事/的/痛/解）懒加载单例（P6 提供）。"""
+        if self._skill is None:
+            from .skill.memory import SkillMemory
+
+            self._skill = SkillMemory(self._base / "data")
+        return self._skill
+
+    # ================= 谈话维度（分层总结管线） =================
+    @property
+    def registry(self):
+        """谈话注册表：生命周期 + 一级总结归属 + 二级总结游标。"""
+        return self.short_term.registry
+
+    def start_conversation(self, session_id: str, user_id: str = "") -> None:
+        """登记谈话开始（幂等）。"""
+        self.short_term.registry.start(session_id, user_id=user_id)
+
+    def end_conversation(self, session_id: str, summary_json: str = "") -> None:
+        """结束谈话；带总结时标记 summarized。"""
+        self.short_term.registry.end(session_id, summary_json=summary_json)
+
+    def record_turn(self, session_id: str, agent_name: str, user_id: str = "") -> None:
+        """登记该谈话最近一轮由哪个智能体处理（supervisor 路由后调用）。"""
+        self.short_term.record_turn(session_id, agent_name, user_id=user_id)
+
+    def window_context(self, user_id: str = "", k: int | None = None,
+                       token_guard: int | None = None) -> list[dict]:
+        """短期窗口：最近 K 个谈话的总结+原文（token 守卫裁剪）。"""
+        return self.short_term.window_context(user_id=user_id, k=k, token_guard=token_guard)
+
+    # ================= 知识库（索引先行两阶段） =================
+    def ingest_knowledge(self, user_id: str, title: str, text: str, caller=None) -> dict:
+        """文档入库（写 L1）：分块 + 每块生成索引简述。"""
+        return self.knowledge.ingest(user_id, title, text, caller=caller)
+
+    def get_index(self, user_id: str | None = None, filter_keywords: list[str] | None = None,
+                  limit: int = 50) -> list[dict]:
+        """索引（简述/关键词），agent 先看索引再取正文。"""
+        return self.knowledge.get_index(user_id=user_id, filter_keywords=filter_keywords, limit=limit)
+
+    def fetch_knowledge(self, chunk_ids: list[int]) -> list[dict]:
+        """按 chunk_id 取块正文。"""
+        return self.knowledge.fetch_knowledge(chunk_ids)
+
+    # ================= 状态记忆（死规则） =================
+    def add_rule(self, rule_text: str, scope: str = "global", agent_types: str | None = None,
+                 priority: int = 10, caller=None) -> int:
+        """新增死规则（写 L3）。"""
+        return self.state.add_rule(rule_text, scope=scope, agent_types=agent_types,
+                                   priority=priority, caller=caller)
+
+    def inject_rules(self, agent_type: str | None = None, user_id: str | None = None) -> str:
+        """死规则注入块（每次上下文组装必调）。"""
+        return self.state.inject_block(agent_type=agent_type, user_id=user_id)
+
+    # ================= 技能记忆（事/的/痛/解 + 反馈闭环） =================
+    def add_skill(self, situation: str, goal: str, pain: str, solution: str,
+                  tags: list[str] | None = None, trigger: str = "", caller=None) -> int:
+        """新增一条技能记忆（写 L2）。"""
+        return self.skill.add_skill(situation, goal, pain, solution,
+                                    tags=tags, trigger=trigger, caller=caller)
+
+    def search_skills(self, text: str, top_k: int = 5,
+                      include_archived: bool = False) -> list[dict]:
+        """关键词/tags 检索技能（读 L0；向量检索接入位留 TODO）。"""
+        return self.skill.search_skills(text, top_k=top_k, include_archived=include_archived)
+
+    def skill_feedback(self, skill_id: int, success: bool) -> dict:
+        """技能采用结果回报：更新 score，连续失败自动归档。"""
+        return self.skill.feedback(skill_id, success)
+
+    def hot_skills(self, top: int | None = None) -> list[dict]:
+        """热技能（上下文预注入用），条数默认取 config.SKILL_HOT_INJECT_TOP。"""
+        if top is None:
+            top = config.SKILL_HOT_INJECT_TOP
+        return self.skill.hot_skills(top=int(top))
 
     # ================= LLM 输入接口（对话消息） =================
     @property

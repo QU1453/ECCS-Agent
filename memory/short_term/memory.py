@@ -24,7 +24,21 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, Remove
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 
+import config  # 记忆参数槽位（K 窗口 / token 守卫），读取环境变量与默认值
 from .compress import Compressor
+from .registry import ConversationRegistry, parse_summary
+
+# ---- token 估算（窗口组装守卫用）----
+# 优先复用 long_term.chunker（同口径）；hnswlib 不可用（Windows 无编译环境）时降级本地实现
+try:  # pragma: no cover - 依赖分支
+    from ..long_term.chunker import estimate_tokens as _estimate_tokens
+except Exception:  # noqa: BLE001
+    def _estimate_tokens(text: str) -> int:
+        cjk = sum(
+            1 for c in text
+            if "\u2e80" <= c <= "\u9fff" or "\u3040" <= c <= "\u30ff" or "\uff00" <= c <= "\uffef"
+        )
+        return cjk + (len(text) - cjk) // 4
 
 _ROLE_MAP = {"human": "user", "ai": "assistant", "system": "system", "tool": "tool"}
 
@@ -78,6 +92,8 @@ class ShortTermMemory:
         self._conn.commit()
         self._saver = SqliteSaver(self._conn)
         self._writer = self._compile_writer()
+        # 谈话注册表（同连接）：谈话生命周期 + 一级总结归属 + 二级总结游标
+        self.registry = ConversationRegistry(self._conn)
 
     # ---- 内部：一个挂在同一 saver 上的最小写图（invoke/update_state 即写入 checkpoint）----
     def _compile_writer(self):
@@ -100,6 +116,92 @@ class ShortTermMemory:
     def add_message(self, session_id: str, role: str, content: str) -> None:
         """写入一条对话消息到该会话 checkpoint（role: user/assistant/system）。"""
         self._writer.invoke({"messages": [_to_message(role, content)]}, self.chat_config(session_id))
+
+    # ---------- 谈话维度（窗口组装 / 分层总结用） ----------
+    def record_turn(self, session_id: str, agent_name: str, user_id: str = "") -> None:
+        """登记该谈话最近一轮由哪个智能体处理（总结/原文取回依赖此记录）。
+
+        supervisor 每次路由后调用；谈话未登记时自动补登记（open 状态）。
+        """
+        reg = self.registry
+        reg.start(session_id, user_id=user_id, agent_name=agent_name)
+        reg.update_agent(session_id, agent_name)
+
+    def window_context(self, user_id: str = "", k: int | None = None,
+                       token_guard: int | None = None, include_open: bool = True) -> list[dict]:
+        """拼装短期窗口：最近 K 个已结束谈话的「一级总结 + 原文」+ 进行中的谈话。
+
+        返回块列表（时间升序）：每块 {conversation_id, agent, topic, summary, raw, raw_dropped}；
+        token 守卫：总估算超过 token_guard 时按最新优先丢最旧谈话的 raw（绝不丢 summary），
+        并在列表头部插入标记块（conversation_id="__window_marker__"）说明省略次数。
+        """
+        k = int(k) if k else config.SHORT_TERM_CONVERSATIONS
+        limit = config.CONTEXT_TOKEN_GUARD if token_guard is None else int(token_guard)
+
+        blocks: list[dict] = []
+        for c in reversed(self.registry.recent_closed(k, user_id=user_id)):  # 倒序→升序
+            blocks.append(self._conversation_block(c))
+        if include_open:
+            for c in self.registry.open_conversations(user_id=user_id):
+                blocks.append(self._conversation_block(c))
+
+        # token 守卫：超限时从最旧块开始丢 raw（不丢 summary），并记录省略数
+        dropped = 0
+        total = sum(self._block_tokens(b) for b in blocks)
+        idx = 0
+        while total > limit and idx < len(blocks):
+            b = blocks[idx]
+            if b["raw"]:  # 只丢原文；全窗口只剩 summary 时停止
+                total -= self._block_tokens(b)
+                b["raw"] = []
+                b["raw_dropped"] = True
+                dropped += 1
+                total += self._block_tokens(b)
+            idx += 1
+        if dropped:
+            blocks.insert(0, {
+                "conversation_id": "__window_marker__",
+                "agent": "", "topic": f"已省略更早谈话 {dropped} 次（原文退役，摘要已接力）",
+                "summary": {}, "raw": [], "raw_dropped": False,
+            })
+        return blocks
+
+    def _conversation_block(self, c: dict) -> dict:
+        """单个谈话 → 窗口块：解析一级总结，并按 agent_name 取回 checkpoint 原文。"""
+        summary = parse_summary(c.get("summary_json", ""))
+        raw: list[dict] = []
+        agent = c.get("agent_name") or ""
+        if agent:
+            try:
+                sid = agent_session_id(agent, c["session_id"])
+                raw = [
+                    {
+                        "role": _ROLE_MAP.get(getattr(m, "type", "human"), "user"),
+                        "content": getattr(m, "content", ""),
+                    }
+                    for m in self.get_messages(sid)
+                    if not _is_summary_msg(m)  # 回流的压缩摘要不进窗口原文（summary 字段才是口径）
+                ]
+            except Exception:  # noqa: BLE001 - 线程不存在等场景，块只带总结
+                raw = []
+        return {
+            "conversation_id": c["session_id"],
+            "agent": agent,
+            "topic": (summary or {}).get("topic", "") or "",
+            "summary": summary or {},
+            "raw": raw,
+            "raw_dropped": False,
+        }
+
+    @staticmethod
+    def _block_tokens(b: dict) -> int:
+        """单块 token 估算（用于守卫裁剪）。"""
+        n = _estimate_tokens(b.get("topic", ""))
+        for k in ("user_requests", "decisions", "pending_items", "tags"):
+            n += _estimate_tokens(" ".join(map(str, b.get("summary", {}).get(k, []) or [])))
+        for m in b.get("raw", []):
+            n += _estimate_tokens(str(m.get("content", "")))
+        return n
 
     # ---------- 读 ----------
     def get_messages(self, session_id: str) -> list[BaseMessage]:

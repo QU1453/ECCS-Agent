@@ -6,7 +6,9 @@
 """
 from .base import ReActAgentBase, is_japanese
 from .customer_service import CustomerServiceAgent, classic_reply
+from .listing_agent import ListingAgent, classic_listing_reply
 from .presales import PreSalesAgent, classic_presales_reply
+from .research_agent import ResearchAgent, classic_research_reply
 from .supervisor import Supervisor
 
 __all__ = [
@@ -14,7 +16,11 @@ __all__ = [
     "is_japanese",
     "CustomerServiceAgent",
     "PreSalesAgent",
+    "ResearchAgent",
+    "ListingAgent",
     "Supervisor",
     "classic_reply",
     "classic_presales_reply",
+    "classic_research_reply",
+    "classic_listing_reply",
 ]

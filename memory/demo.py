@@ -8,6 +8,7 @@ ANN-RAG 召回（速度 + 准确率对照）、跨实例持久化、build_contex
 """
 from __future__ import annotations
 
+import json
 import shutil
 import time
 from pathlib import Path
@@ -15,8 +16,11 @@ from pathlib import Path
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, MessagesState, START, StateGraph
 
+import config
+from .access import AccessError, AuditLogger, MemoryCaller
 from .long_term.rag import HashEmbeddingProvider
 from .manager import MemoryManager
+from .short_term.memory import agent_session_id
 
 THRESHOLD, KEEP_RECENT = 30, 10
 N_MSG = 36  # > 阈值，保证压缩触发
@@ -118,6 +122,84 @@ def main() -> int:
     assert ctx["recalled"] and any("优惠" in h["text"] for h in ctx["recalled"])
     print("   ✓ 重启后短期/长期/索引全部一致")
     mm2.close()
+
+    print("[5] 权限体系 + 审计：越权拒绝 / 显式授权 / 审计留痕")
+    extra = Path(base) / "cognition"
+    mm3 = MemoryManager(extra, llm=None, embedding_provider=HashEmbeddingProvider())
+    try:
+        mm3.add_skill("s", "g", "p", "x", caller=MemoryCaller("normal_agent", "L0"))
+        raise AssertionError("L0 写技能不应成功")
+    except AccessError:
+        print("   ✓ L0 写技能被拒（AccessError）")
+    recents = AuditLogger.recent(5)
+    assert recents and any(r["result"] == "deny" for r in recents), "审计表应有 deny 记录"
+    sid = mm3.add_skill("s", "g", "p", "x", caller=MemoryCaller("reflector", "L2"))
+    assert sid > 0
+    print("   ✓ L2 写技能成功；审计表已记录 allow/deny")
+
+    print("[6] 谈话注册 + 短期窗口（K 裁剪 + token 守卫）")
+    stm = mm3.short_term
+    for i in range(1, 7):
+        cid = f"win-{i}"
+        stm.registry.start(cid, user_id="win-user", agent_name="research")
+        stm.add_message(agent_session_id("research", cid), "user", f"第 {i} 次谈话的问题")
+        stm.add_message(agent_session_id("research", cid), "assistant", f"第 {i} 次谈话的回答")
+        summary = {"topic": f"谈话{i}主题", "user_requests": [f"需求{i}"],
+                   "key_facts": [], "decisions": [], "pending_items": [],
+                   "entities": [], "preferences": [], "artifacts": [], "tags": [],
+                   "conversation_id": cid, "user_id": "win-user", "time_range": ""}
+        stm.registry.set_summary(cid, json.dumps(summary, ensure_ascii=False))
+        stm.registry.end(cid, json.dumps(summary, ensure_ascii=False))
+    blocks = stm.window_context(user_id="win-user", k=3, token_guard=10 ** 9, include_open=False)
+    assert [b["topic"] for b in blocks] == ["谈话4主题", "谈话5主题", "谈话6主题"], "K 窗口应含最近 3 个"
+    print("   ✓ K=3 只含最近 3 个已结束谈话")
+    blocks = stm.window_context(user_id="win-user", k=6, token_guard=8, include_open=False)
+    assert blocks[0]["conversation_id"] == "__window_marker__", "超限应有省略打标"
+    assert all(b["summary"] for b in blocks if b["conversation_id"] != "__window_marker__"), "summary 绝不丢"
+    dropped = [b for b in blocks if b.get("raw_dropped")]
+    assert dropped, "最旧谈话的 raw 应被裁剪"
+    print(f"   ✓ token 守卫生效：{len(dropped)} 块原文退役，摘要保留、头部打标")
+
+    print("[7] 知识库：索引先行两阶段检索")
+    caller_l1 = MemoryCaller("ingestor", "L1")
+    info = mm3.ingest_knowledge("k-user", "选品手册",
+                                "充电宝选品要点：搜索量看趋势、竞品评分低于 4.3 好入场。"
+                                "listing 标题不超过 75 字符，主图纯白底。", caller=caller_l1)
+    idx = mm3.get_index(user_id="k-user")
+    assert idx and all("brief" in i and "chunk_id" in i for i in idx), "索引简述缺失"
+    print(f"   ✓ 入库 {info['chunks']} 块；索引简述 {len(idx)} 条（无需拉正文）")
+    full = mm3.fetch_knowledge([idx[0]["chunk_id"]])
+    assert full and "充电宝" in full[0]["text"]
+    print("   ✓ 第二阶段按 chunk_id 取正文命中")
+
+    print("[8] 状态记忆：死规则注入 + L3 写权限")
+    block = mm3.inject_rules()
+    assert block and "铁律" in block, "应注入种子死规则块"
+    print(f"   ✓ 注入 {len(block.splitlines()) - 1} 条死规则")
+    old_switch = config.STATE_MEMORY_INJECT
+    config.STATE_MEMORY_INJECT = False
+    assert mm3.inject_rules() == "", "总开关关闭应返回空"
+    config.STATE_MEMORY_INJECT = old_switch
+    try:
+        mm3.add_rule("测试规则", caller=MemoryCaller("ops", "L0"))
+        raise AssertionError("L0 写死规则不应成功")
+    except AccessError:
+        pass
+    rid = mm3.add_rule("演示期规则：不得编造订单数据", caller=MemoryCaller("admin", "L3"))
+    assert rid > 0
+    print("   ✓ L3 写成功、L0 被拒；开关可整体关闭")
+
+    print("[9] 技能记忆：检索命中 + 反馈归档闭环")
+    assert any(x["id"] == sid for x in mm3.search_skills("s g p"))
+    for _ in range(3):
+        mm3.skill_feedback(sid, False)
+    assert mm3.skill.get_skill(sid)["status"] == "archived"
+    mm3.skill_feedback(sid, True)
+    assert mm3.skill.get_skill(sid)["status"] == "active"
+    hot = mm3.hot_skills(top=3)
+    assert isinstance(hot, list)
+    print("   ✓ 检索命中 → 连续失败归档 → 成功复出 → hot_skills 可用")
+    mm3.close()
 
     print("=" * 64)
     print("DEMO ALL PASS ✓（数据目录：memory/demo_data，可删除）")

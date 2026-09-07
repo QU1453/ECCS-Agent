@@ -9,10 +9,12 @@
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 from pathlib import Path
 
+from ..access import AccessError, MemoryCaller, SYSTEM_CALLER, guard
 from .ann import AnnIndex, cosine
 from .chunker import chunk_text
 from .rag import EmbeddingCache, EmbeddingProvider, pick_provider, text_hash
@@ -49,6 +51,19 @@ CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_user ON chunks(user_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_hash ON chunks(text_hash);
 CREATE TABLE IF NOT EXISTS ann_meta(key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS long_term_entries(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL,
+  entry_type TEXT NOT NULL,          -- user_profile / fact / pending_item / preference
+  content TEXT NOT NULL,
+  confidence REAL DEFAULT 0.5,
+  source_conversations TEXT DEFAULT '[]',  -- JSON 数组（来源谈话 ID，可回溯）
+  tags TEXT DEFAULT '[]',
+  status TEXT DEFAULT 'active',
+  created_by TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_lte_user ON long_term_entries(user_id);
 """
 
 
@@ -161,6 +176,76 @@ class LongTermMemory:
             cur = self._conn.execute("DELETE FROM facts WHERE user_id=? AND key=?", (str(user_id), key))
             self._conn.commit()
         return cur.rowcount > 0
+
+    # ---------- 长期记忆范式条目（二级总结产物） ----------
+    def save_long_term_entry(
+        self,
+        user_id: str,
+        entry_type: str,
+        content: str,
+        confidence: float = 0.5,
+        tags: list[str] | None = None,
+        source_conversations: list[str] | None = None,
+        created_by: str = "",
+        caller: MemoryCaller | None = None,
+    ) -> int:
+        """写入一条长期记忆范式条目；写权限 L1（总结管线），默认拒绝、显式授权。"""
+        caller = caller or SYSTEM_CALLER
+        guard("long_term", "write", caller)
+        if entry_type not in ("user_profile", "fact", "pending_item", "preference"):
+            raise ValueError(f"非法 entry_type：{entry_type}")
+        with self._wlock:
+            cur = self._conn.execute(
+                "INSERT INTO long_term_entries"
+                "(user_id, entry_type, content, confidence, source_conversations, tags, created_by)"
+                " VALUES(?,?,?,?,?,?,?)",
+                (
+                    str(user_id), entry_type, str(content), float(confidence),
+                    json.dumps(source_conversations or [], ensure_ascii=False),
+                    json.dumps(tags or [], ensure_ascii=False),
+                    created_by or caller.name,
+                ),
+            )
+            self._conn.commit()
+        return int(cur.lastrowid)
+
+    def get_long_term_entries(self, user_id: str, entry_type: str | None = None,
+                              limit: int = 20, status: str = "active") -> list[dict]:
+        """读该用户长期记忆条目（读权限全员开放）。"""
+        sql = ("SELECT id, entry_type, content, confidence, source_conversations, tags,"
+               " created_by, created_at FROM long_term_entries"
+               " WHERE user_id=? AND status=?")
+        args: list = [str(user_id), status]
+        if entry_type:
+            sql += " AND entry_type=?"
+            args.append(entry_type)
+        sql += " ORDER BY id DESC LIMIT ?"
+        args.append(int(limit))
+        out = []
+        for row in self._conn.execute(sql, args):
+            try:
+                sources = json.loads(row[4])
+            except (json.JSONDecodeError, TypeError):
+                sources = []
+            try:
+                tags = json.loads(row[5])
+            except (json.JSONDecodeError, TypeError):
+                tags = []
+            out.append({
+                "id": row[0], "entry_type": row[1], "content": row[2],
+                "confidence": row[3], "source_conversations": sources,
+                "tags": tags, "created_by": row[6], "created_at": row[7],
+            })
+        return out
+
+    def set_entry_status(self, entry_id: int, status: str, caller: MemoryCaller | None = None) -> None:
+        """改/删条目状态（active → archived）；改权限 L3 / L9。"""
+        caller = caller or SYSTEM_CALLER
+        guard("long_term", "modify", caller)
+        with self._wlock:
+            self._conn.execute(
+                "UPDATE long_term_entries SET status=? WHERE id=?", (status, int(entry_id)))
+            self._conn.commit()
 
     # ---------- 后端数据输入接口：自由文本/文档（分块 → ANN 入库） ----------
     def add_document(self, user_id: str, text: str, title: str | None = None,

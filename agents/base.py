@@ -16,53 +16,25 @@
 """
 from __future__ import annotations
 
-import re
-
 from config import MODEL_ID
+from core.cognition.react import (  # ReAct 引擎提炼到认知层（思考推理），此处薄封装重导出
+    _HAS_LANGGRAPH,
+    _JA_REPLY_HINT,
+    _build_react_agent,
+    create_react_agent,
+    is_japanese,
+)
 from memory import get_memory, get_short_term, thread_id_for
 from tools import lookup_order, recommend_for
 
-# ---- 日语识别与回复提示：命中假名即视为日语用户，LLM 回复切换为日语敬体 --------------
-_JA_RE = re.compile(r"[\u3040-\u309f\u30a0-\u30ff]")  # 平假名 / 片假名
-# 仅汉字无法区分中日（如"注文"），假名是日语的强特征；纯中文/英文不命中
-_JA_REPLY_HINT = (
-    "本次对话用户使用日语。请用日语回复，并遵守日本电商客服敬语规范：\n"
-    "- 全程使用丁寧語・敬語（です・ます調），称呼顾客为「お客様」；\n"
-    "- 常用服务用语：「かしこまりました」「恐れ入りますが」「お問い合わせいただきありがとうございます」；\n"
-    "- 金额用「円」、日期用日本书写习惯；专有名词（商品名、配送公司）保持原文。"
-)
-
-
-def is_japanese(text: str) -> bool:
-    """是否日语用户输入（含假名即视为日语；供 LLM 提示与兜底双语回复共用）。"""
-    return bool(_JA_RE.search(text or ""))
-
-# ---- LangGraph 相关为可选依赖：装不上也能以"本地兜底模式"运行 -------------------
+# 兼容旧引用（如 agents/customer_service.py 的 from .base import is_japanese）
+JA_REPLY_HINT = _JA_REPLY_HINT
+ChatOpenAI = None
 try:
-    from langchain_openai import ChatOpenAI
-    from langgraph.prebuilt import create_react_agent
-
-    _HAS_LANGGRAPH = True
+    from langchain_openai import ChatOpenAI as _ChatOpenAI  # 兼容旧引用（基类初始化用）
+    ChatOpenAI = _ChatOpenAI
 except Exception:  # pragma: no cover - 离线环境 / 未安装依赖时
-    _HAS_LANGGRAPH = False
-    create_react_agent = None
-    ChatOpenAI = None
-
-
-def _build_react_agent(llm, tools, prompt, checkpointer=None):
-    """兼容不同 langgraph 版本：1.x 用 prompt=，旧版用 messages_modifier/state_modifier=。
-
-    prompt 可为 str 或 callable：callable 接收当前 state（dict 或消息列表，视版本而定），
-    返回完整模型输入消息列表（固定系统提示 + 每轮动态上下文 + 历史消息）。
-    """
-    for prompt_kw in ("prompt", "messages_modifier", "state_modifier"):
-        try:
-            return create_react_agent(
-                model=llm, tools=tools, checkpointer=checkpointer, **{prompt_kw: prompt}
-            )
-        except TypeError:
-            continue
-    raise TypeError("create_react_agent 参数签名不兼容")
+    pass
 
 
 def build_memory_context(mm, uid: str, question: str,
@@ -132,11 +104,13 @@ class ReActAgentBase:
         """LLM 模式是否可用。"""
         return self._graph is not None
 
-    def answer(self, question: str, session_id: str = "default") -> dict | None:
+    def answer(self, question: str, session_id: str = "default",
+               extra_system: list[str] | None = None) -> dict | None:
         """调用 LLM Agent，返回 {reply, intent, data}；失败返回 None（交由兜底）。
 
         多轮记忆：checkpointer 按 thread_id（= session_id）自动携带历史上下文，
-        无需手动拼接 history。
+        无需手动拼接 history。extra_system：编排层（orchestrator）注入的
+        每轮动态上下文块（死规则/长期记忆/知识库索引/短窗口话题/热技能）。
         """
         if not self.available:
             return None
@@ -144,11 +118,13 @@ class ReActAgentBase:
             config = {"configurable": {"thread_id": thread_id_for(session_id)}}
             # 每轮重建动态系统上下文（经 _dynamic_prompt 组装，不落 checkpoint 历史）：
             # 1) 长期记忆（用户事实 + RAG 召回）——空库/hnswlib 不可用时为零开销路径；
-            # 2) 日语提示（含假名即视为日语用户；按当前输入语言逐轮生效，历史零残留）
+            # 2) 编排层注入块（extra_system）：五模块记忆的系统上下文；
+            # 3) 日语提示（含假名即视为日语用户；按当前输入语言逐轮生效，历史零残留）
             mm = get_memory()
             ctx = build_memory_context(mm, session_id, question) if mm is not None else None
             self._dynamic_system = (
                 ([ctx] if ctx else [])
+                + (extra_system or [])
                 + ([_JA_REPLY_HINT] if is_japanese(question) else [])
             )
             # 记录本轮前的消息数：invoke 返回的是整条 thread 的全量消息，

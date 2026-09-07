@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ECCS 智能客服</title>
+<title>ECCS 卖家工作台</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&display=swap" rel="stylesheet">
@@ -23,12 +23,14 @@
       <div class="shop">
         <div class="avatar">絵</div>
         <div class="shop-meta">
-          <h1 data-i18n="title">ECCS 智能客服</h1>
+          <h1 data-i18n="title">ECCS 卖家工作台</h1>
           <p><span class="status"><i class="dot"></i><span data-i18n="status">在线 · 秒回</span></span></p>
         </div>
       </div>
 
       <div class="head-actions">
+        <!-- 结束本次谈话：触发一级总结管线 -->
+        <button class="txt-btn" id="endBtn" type="button" data-i18n="endTalk">结束谈话</button>
         <button class="icon-btn" id="clearBtn" title="清空对话" data-i18n-title="clearTip" aria-label="清空对话">
           <svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6.5 7l.8 12h9.4l.8-12"/></svg>
         </button>
@@ -40,18 +42,31 @@
       </div>
     </header>
 
-    <div class="msgs" id="msgs"></div>
+    <!-- 双工作台标签：选品 / Listing（各自独立聊天流与谈话会话） -->
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-bench="research" type="button" data-i18n="tabResearch">选品工作台</button>
+      <button class="tab" data-bench="listing" type="button" data-i18n="tabListing">Listing 工作台</button>
+    </nav>
+
+    <div class="msgs active" id="msgs-research"></div>
+    <div class="msgs" id="msgs-listing"></div>
 
     <footer class="composer">
-      <div class="quick-row" id="chips">
-        <button class="quick" data-q-key="q1" type="button" data-i18n="q1">订单到哪了？</button>
-        <button class="quick" data-q-key="q2" type="button" data-i18n="q2">怎么退货？</button>
-        <button class="quick" data-q-key="q3" type="button" data-i18n="q3">推荐一款耳机</button>
+      <!-- 每个工作台各自的快捷提问 -->
+      <div class="quick-row" id="chips-research">
+        <button class="quick" data-q-key="r1" type="button" data-i18n="r1">帮我选个充电宝</button>
+        <button class="quick" data-q-key="r2" type="button" data-i18n="r2">对比蓝牙耳机供应商</button>
+        <button class="quick" data-q-key="r3" type="button" data-i18n="r3">充电宝利润测算</button>
+      </div>
+      <div class="quick-row" id="chips-listing" hidden>
+        <button class="quick" data-q-key="l1" type="button" data-i18n="l1">给云感耳机写 Listing</button>
+        <button class="quick" data-q-key="l2" type="button" data-i18n="l2">检查主图合规</button>
+        <button class="quick" data-q-key="l3" type="button" data-i18n="l3">云感耳机定价建议</button>
       </div>
       <div class="composer-box">
-        <textarea id="input" rows="1" data-i18n-ph="placeholder" placeholder="请输入您的问题…（Enter 发送）"></textarea>
+        <textarea id="input" rows="1" data-i18n-ph="placeholder" placeholder="输入选品/上架需求…（Enter 发送）"></textarea>
         <div class="composer-ctrl">
-          <span class="hint" id="hint" data-i18n="hint">AI 智能体自动接待 · 平均耗时 1.5s</span>
+          <span class="hint" id="hint" data-i18n="hint">AI 多智能体工作台 · 选品 + Listing 上架</span>
           <button class="btn btn-send" id="sendBtn" type="button" aria-label="发送">
             <svg viewBox="0 0 24 24"><path d="M4.5 11.5 20 4l-7.5 15.5-2-6-6-2z"/></svg>
           </button>

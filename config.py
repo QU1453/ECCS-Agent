@@ -33,3 +33,22 @@ MODEL_ID: str = os.getenv("OPENAI_MODEL", "glm-5.3-flash").strip() or "glm-5.3-f
 # ===== 服务配置 =====
 HOST: str = os.getenv("SERVER_HOST", "127.0.0.1")
 PORT: int = int(os.getenv("SERVER_PORT", "8623"))
+
+# ===== 记忆系统配置槽（见 docs/memory-system-design.md §8）=====
+# 短期窗口内的谈话数 K（可调高 8/10）
+SHORT_TERM_CONVERSATIONS: int = int(os.getenv("SHORT_TERM_CONVERSATIONS", "5"))
+
+# 每 M 个谈话触发一次二级总结（滚动合并进长期记忆）
+L2_SUMMARY_INTERVAL: int = int(os.getenv("L2_SUMMARY_INTERVAL", "5"))
+
+# 窗口组装 token 上限：超限按最新优先丢最旧谈话原文（绝不丢一级总结）
+CONTEXT_TOKEN_GUARD: int = int(os.getenv("CONTEXT_TOKEN_GUARD", "24000"))
+
+# 状态记忆（死规则）注入开关：False 时不再向 LLM 上下文注入铁律块
+STATE_MEMORY_INJECT: bool = os.getenv("STATE_MEMORY_INJECT", "1") == "1"
+
+# 热技能（评分最高）预注入条数
+SKILL_HOT_INJECT_TOP: int = int(os.getenv("SKILL_HOT_INJECT_TOP", "3"))
+
+# 总结智能体模型（默认跟随主模型 glm-5.3-flash）
+SUMMARIZER_MODEL: str = os.getenv("SUMMARIZER_MODEL", "").strip() or MODEL_ID

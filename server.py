@@ -24,7 +24,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import config
-from agents import Supervisor, classic_reply
+from agents import Supervisor
+from core.dispatch.orchestrator import Orchestrator
+from core.perception.session import start_conversation
 from memory import agent_session_id, get_short_term
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -47,17 +49,31 @@ app.mount("/ui", StaticFiles(directory=BASE_DIR / "ui"), name="ui")
 class AskRequest(BaseModel):
     message: str
     session_id: str = "default"
+    user_id: str = "default"
 
 
 class ClearRequest(BaseModel):
     session_id: str = "default"
 
 
+class EndConversationRequest(BaseModel):
+    session_id: str
+    user_id: str = "default"
+
+
+class StartConversationRequest(BaseModel):
+    user_id: str = "default"
+
+
 class AgentService:
-    """懒加载单例 Supervisor（多智能体主控）；多轮记忆由 memory/ 的 checkpointer 托管。"""
+    """懒加载单例 Supervisor（多智能体主控）+ Orchestrator（认知层编排）。
+
+    多轮记忆由 memory/ 的 checkpointer 托管；/api/ask 走编排器流水线。
+    """
 
     def __init__(self) -> None:
         self._supervisor: Supervisor | None = None
+        self._orchestrator: Orchestrator | None = None
 
     def supervisor(self) -> Supervisor:
         if self._supervisor is None:
@@ -66,14 +82,23 @@ class AgentService:
             )
         return self._supervisor
 
-    def ask(self, message: str, session_id: str) -> dict:
-        sup = self.supervisor()
-        # 真实 LLM：多轮记忆 = LangGraph MemorySaver 按 thread_id(session_id) 隔离
-        result = sup.answer(message, session_id) if sup.available else None
-        if result and result.get("reply"):
-            return result
-        # 兜底：未配置 Key / Agent 不可用 / 调用异常（单轮，无记忆）
-        return classic_reply(message)
+    def orchestrator(self) -> Orchestrator:
+        if self._orchestrator is None:
+            self._orchestrator = Orchestrator(self.supervisor())
+        return self._orchestrator
+
+    def ask(self, message: str, session_id: str, user_id: str) -> dict:
+        """问答复用编排器：感知 → 上下文组装 → 路由 → 兜底 → 输出契约。"""
+        return self.orchestrator().answer(message, session_id, user_id=user_id)
+
+    def start_conversation(self, user_id: str) -> dict:
+        """开始新谈话：生成 session_id 并登记（谈话注册表）。"""
+        session_id = start_conversation(user_id)
+        return {"ok": True, "session_id": session_id, "user_id": user_id}
+
+    def end_conversation(self, session_id: str, user_id: str) -> dict:
+        """结束谈话：触发一级总结（并视游标触发二级总结）——分层总结管线入口。"""
+        return self.supervisor().end_conversation(session_id, user_id=user_id)
 
     def clear_session(self, session_id: str) -> list[str]:
         """真清空：清除该会话在全部专职智能体下的 checkpoint 线程与压缩摘要。
@@ -82,7 +107,7 @@ class AgentService:
         """
         stm = get_short_term()
         cleared = []
-        for name in ("customer_service", "presales"):
+        for name in ("customer_service", "presales", "research", "listing"):
             sid = agent_session_id(name, session_id)
             stm.clear(sid)  # checkpoint 线程 + 摘要行一并清除
             cleared.append(sid)
@@ -101,6 +126,7 @@ async def status() -> dict:
         "mode": "llm" if sup.available else "local-fallback",
         "model": sup.model if sup.available else None,
         "reason": sup.reason,
+        "specialists": sorted(sup.specialists.keys()),
     }
 
 
@@ -109,8 +135,24 @@ async def ask(req: AskRequest) -> JSONResponse:
     message = req.message.strip()
     if not message:
         return JSONResponse({"error": "message 不能为空"}, status_code=400)
-    reply = service.ask(message, req.session_id)
+    reply = service.ask(message, req.session_id, req.user_id.strip() or "default")
     return JSONResponse(reply)
+
+
+@app.post("/api/conversation/start")
+async def conversation_start(req: StartConversationRequest) -> JSONResponse:
+    """开始新谈话：返回新 session_id（前端存 localStorage，替代手工生成）。"""
+    return JSONResponse(service.start_conversation(req.user_id.strip() or "default"))
+
+
+@app.post("/api/conversation/end")
+async def end_conversation(req: EndConversationRequest) -> JSONResponse:
+    """结束谈话：一级总结入库，达 M 个触发二级总结。"""
+    sid = req.session_id.strip()
+    if not sid:
+        return JSONResponse({"error": "session_id 不能为空"}, status_code=400)
+    result = service.end_conversation(sid, req.user_id.strip() or "default")
+    return JSONResponse(result)
 
 
 @app.post("/api/clear")
