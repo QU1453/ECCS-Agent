@@ -15,4 +15,17 @@ services:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-}
       SERVER_HOST: 0.0.0.0
+    volumes:
+      # 运行时数据持久化（容器重建不丢）：短期记忆 checkpoint / 长期记忆 ANN /
+      # 权限审计 / 遥测库（调试后台 /debug 的数据源）
+      - eccs_short_term:/app/memory/short_term/data
+      - eccs_long_term:/app/memory/long_term/data
+      - eccs_audit:/app/memory/data
+      - eccs_telemetry:/app/core/telemetry/data
     restart: unless-stopped
+
+volumes:
+  eccs_short_term:
+  eccs_long_term:
+  eccs_audit:
+  eccs_telemetry:
