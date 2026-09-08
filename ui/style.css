@@ -221,6 +221,9 @@ body {
 .txt-btn:hover { background: #f7d9c0; border-color: rgba(228,87,27,.55); transform: translateY(-1px); }
 .txt-btn:active { transform: translateY(0); }
 
+/* 调试后台入口（顶栏链接，同 txt-btn 观感但更低调） */
+.debug-link { text-decoration: none; display: inline-flex; align-items: center; }
+
 /* ---- 工作台标签 ---- */
 .tabs {
   display: flex; gap: 6px; padding: 10px 18px 0;

@@ -70,6 +70,9 @@ checkpoints/
 memory/*/data/
 memory/data/
 memory/demo_data/
+
+# ===== 遥测模块运行时数据（调试后台 trace/events 库，不入库）=====
+core/telemetry/data/
 .tmp/
 
 # ===== 单元测试（仅本地运行，不入库）=====

@@ -37,6 +37,28 @@ except Exception:  # pragma: no cover - 离线环境 / 未安装依赖时
     pass
 
 
+def _extract_telemetry(result: dict, prev_count: int, model: str) -> dict:
+    """从本轮新增消息提取遥测数据（供 orchestrator 消费后剥离）。
+
+    - input_tokens / output_tokens：累加各 AIMessage 的 usage_metadata
+      （OpenInference 口径 llm.token_count.prompt/completion；与 API 计费一致）；
+    - tool_calls：全部工具调用（name + args，OpenInference 口径 tool_call.function.*）；
+    - model：本轮使用的模型 ID。
+    """
+    msgs = (result.get("messages") or [])[prev_count:]
+    input_tokens = output_tokens = 0
+    tool_calls: list[dict] = []
+    for m in msgs:
+        usage = getattr(m, "usage_metadata", None) or {}
+        input_tokens += int(usage.get("input_tokens") or 0)
+        output_tokens += int(usage.get("output_tokens") or 0)
+        for c in getattr(m, "tool_calls", None) or []:
+            tool_calls.append({"name": c.get("name", ""),
+                               "args": c.get("args") or {}})
+    return {"input_tokens": input_tokens, "output_tokens": output_tokens,
+            "tool_calls": tool_calls, "model": model}
+
+
 def build_memory_context(mm, uid: str, question: str,
                          fact_limit: int = 10, top_k: int = 3) -> str | None:
     """组装长期记忆上下文文本（用户事实 + RAG 召回）；无任何数据返回 None（零开销路径）。
@@ -133,6 +155,15 @@ class ReActAgentBase:
             prev_count = len(state.values.get("messages", [])) if (state and state.values) else 0
             result = self._graph.invoke({"messages": [{"role": "user", "content": question}]}, config)
             formatted = self._format_result(result, prev_count)
+            # 遥测提取：本轮新增消息里的 usage_metadata（真实 token）与 tool_calls
+            # （ReAct 每步模型调用各有一条 AIMessage，逐条累加 = 本轮总消耗）
+            try:
+                from core.telemetry import get_recorder
+
+                get_recorder()  # 触发单例初始化（fail-open，见 recorder）
+                formatted["_telemetry"] = _extract_telemetry(result, prev_count, self.model)
+            except Exception:  # noqa: BLE001 - 遥测故障不影响回复
+                pass
             try:
                 # 每轮推理后触发压缩检查：阈值内只多一次 get_state，零 LLM 开销；
                 # 超阈值时裁剪旧消息并把滚动摘要回流进线程，下一轮自动携带

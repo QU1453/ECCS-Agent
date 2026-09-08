@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ECCS 控制室 · 智能体调试后台</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;900&family=IBM+Plex+Mono:wght@400;500;700&family=Zen+Kaku+Gothic+New:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="debug.css">
+</head>
+<body>
+
+<!-- 扫描线 + 网格底纹（机房氛围） -->
+<div class="scanlines" aria-hidden="true"></div>
+<div class="grid-bg" aria-hidden="true"></div>
+
+<div class="console">
+
+  <!-- ===== 顶栏：机台铭牌 ===== -->
+  <header class="console-head">
+    <div class="brand">
+      <div class="brand-mark">械</div>
+      <div>
+        <h1>ECCS 控制室</h1>
+        <p class="sub">智能体遥测 · 工具调用 · TOKEN 观测 <span class="live-dot" id="liveDot"></span><span id="liveText">待机</span></p>
+      </div>
+    </div>
+    <div class="head-actions">
+      <button class="op-btn" id="refreshBtn" type="button">立即刷新</button>
+      <button class="op-btn toggle" id="pollBtn" type="button" aria-pressed="false">自动轮询 · 关</button>
+      <button class="op-btn danger" id="clearBtn" type="button">清空数据</button>
+      <a class="op-btn ghost" href="/" target="_self">← 返回工作台</a>
+    </div>
+  </header>
+
+  <!-- ===== 概览：五块仪表 ===== -->
+  <section class="gauges" id="gauges">
+    <div class="gauge">
+      <p class="g-label">问答总轮次</p>
+      <p class="g-value" id="gTraces">—</p>
+      <p class="g-foot">traces</p>
+    </div>
+    <div class="gauge">
+      <p class="g-label">TOKEN 总消耗</p>
+      <p class="g-value accent" id="gTokens">—</p>
+      <p class="g-foot"><span id="gTokensIn">—</span> 入 / <span id="gTokensOut">—</span> 出</p>
+    </div>
+    <div class="gauge">
+      <p class="g-label">兜底占比</p>
+      <p class="g-value" id="gFallback">—</p>
+      <p class="g-foot">local-fallback</p>
+    </div>
+    <div class="gauge">
+      <p class="g-label">约束拦截</p>
+      <p class="g-value warn" id="gConstraint">—</p>
+      <p class="g-foot">constraint denied</p>
+    </div>
+    <div class="gauge">
+      <p class="g-label">平均耗时</p>
+      <p class="g-value" id="gLatency">—</p>
+      <p class="g-foot">ms / 轮</p>
+    </div>
+  </section>
+
+  <!-- ===== 中部：工具排行 / 智能体分布 / token 趋势 ===== -->
+  <section class="panels">
+    <div class="panel" id="panelTools">
+      <h2><i class="panel-no">01</i>工具调用排行</h2>
+      <div class="bar-list" id="toolRank"><p class="empty">暂无工具调用记录</p></div>
+    </div>
+    <div class="panel" id="panelRoutes">
+      <h2><i class="panel-no">02</i>智能体分布</h2>
+      <div class="route-bars" id="routeBars"><p class="empty">暂无路由记录</p></div>
+    </div>
+    <div class="panel wide" id="panelTrend">
+      <h2><i class="panel-no">03</i>会话 TOKEN 趋势 <span class="panel-hint">诊断上下文膨胀：入 token 逐轮持续攀升 = 注入失控</span></h2>
+      <div class="trend-wrap">
+        <svg id="trendSvg" viewBox="0 0 600 160" preserveAspectRatio="none"></svg>
+        <p class="empty" id="trendEmpty">在下方选择会话（点击会话列）后显示逐轮趋势</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 最近错误 ===== -->
+  <section class="panel" id="panelErrors" hidden>
+    <h2><i class="panel-no">04</i>最近错误</h2>
+    <ul class="err-list" id="errList"></ul>
+  </section>
+
+  <!-- ===== trace 表格 ===== -->
+  <section class="panel">
+    <h2><i class="panel-no">05</i>运行记录 TRACE LOG</h2>
+    <div class="filters">
+      <select id="filterSession" aria-label="按会话过滤"><option value="">全部会话</option></select>
+      <select id="filterRoute" aria-label="按路由过滤">
+        <option value="">全部路由</option>
+        <option value="research">research</option>
+        <option value="listing">listing</option>
+        <option value="customer_service">customer_service</option>
+        <option value="presales">presales</option>
+        <option value="constraint">constraint</option>
+      </select>
+      <span class="filter-count" id="traceCount">0 条</span>
+    </div>
+    <div class="table-wrap">
+      <table class="trace-table">
+        <thead>
+          <tr>
+            <th>时间</th><th>会话</th><th>路由</th><th>模式</th>
+            <th>工具</th><th>TOKEN</th><th>耗时</th><th>状态</th>
+          </tr>
+        </thead>
+        <tbody id="traceBody"><tr><td colspan="8" class="empty">暂无记录，先去工作台聊几句</td></tr></tbody>
+      </table>
+    </div>
+    <div class="detail" id="traceDetail" hidden>
+      <div class="detail-head">
+        <strong id="detailTitle">TRACE</strong>
+        <button class="op-btn ghost small" id="detailClose" type="button">收起</button>
+      </div>
+      <div class="question" id="detailQuestion"></div>
+      <ol class="timeline" id="detailTimeline"></ol>
+    </div>
+  </section>
+
+  <footer class="console-foot">
+    <p>core/telemetry · SQLite 持久化 · fail-open（观测故障不影响主链路）· 仅供本地调试</p>
+  </footer>
+</div>
+
+<script src="debug.js"></script>
+</body>
+</html>

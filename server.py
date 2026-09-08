@@ -17,9 +17,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -27,6 +27,7 @@ import config
 from agents import Supervisor
 from core.dispatch.orchestrator import Orchestrator
 from core.perception.session import start_conversation
+from core.telemetry import get_recorder
 from memory import agent_session_id, get_short_term
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -167,6 +168,52 @@ async def clear(req: ClearRequest) -> dict:
     if not sid:
         return JSONResponse({"error": "session_id 不能为空"}, status_code=400)
     return {"ok": True, "cleared": service.clear_session(sid)}
+
+
+# ===== 遥测 API（调试后台 /debug 的数据源；fail-open，库故障返回空数据）=====
+@app.get("/api/telemetry/traces")
+async def telemetry_traces(
+    limit: int = Query(50, ge=1, le=500),
+    session_id: str = Query(""),
+    route: str = Query(""),
+) -> dict:
+    """近期 trace 列表（倒序；可按会话 / 路由过滤）。"""
+    rec = get_recorder()
+    return {"traces": rec.list_traces(limit=limit, session_id=session_id, route=route)}
+
+
+@app.get("/api/telemetry/traces/{trace_id}")
+async def telemetry_trace(trace_id: int) -> JSONResponse:
+    """单条 trace + 事件明细（时间线）。"""
+    trace = get_recorder().get_trace(trace_id)
+    if trace is None:
+        return JSONResponse({"error": "trace 不存在"}, status_code=404)
+    return JSONResponse(trace)
+
+
+@app.get("/api/telemetry/summary")
+async def telemetry_summary() -> dict:
+    """聚合统计：概览卡 + 工具排行 + 智能体分布 + 最近错误。"""
+    return get_recorder().summary()
+
+
+@app.get("/api/telemetry/trend")
+async def telemetry_trend(session_id: str = Query(...)) -> dict:
+    """某会话逐轮 token 序列（诊断上下文膨胀）。"""
+    return {"trend": get_recorder().token_trend(session_id)}
+
+
+@app.post("/api/telemetry/clear")
+async def telemetry_clear() -> dict:
+    """清空遥测库（调试期维护）。"""
+    get_recorder().clear()
+    return {"ok": True}
+
+
+# 调试后台页面（独立静态页，不与主工作台共用路由）
+@app.get("/debug")
+async def debug_page() -> FileResponse:
+    return FileResponse(BASE_DIR / "ui" / "debug.html")
 
 
 # 根路径挂载静态页（必须放在所有 API 路由之后，避免吞掉 /api/*）：

@@ -61,6 +61,18 @@ def _resolve_access(spec: ToolSpec) -> bool:
     return True
 
 
+def _telemetry_tool(name: str, params: dict, status: str) -> None:
+    """遥测埋点（fail-open）：GLOBAL_REGISTRY.call 的工具事件，归并到当前活跃 trace。"""
+    try:  # noqa: BLE001 - 遥测故障绝不影响工具调用
+        from core.telemetry import get_current_trace, get_recorder
+
+        get_recorder().add_event(
+            get_current_trace(), kind="tool", name=name, params=params, status=status
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 class GlobalRegistry:
     """全局注册表单例：跨模块解析 + 调用 + 审计。线程安全。"""
 
@@ -89,9 +101,10 @@ class GlobalRegistry:
         return self._tools.get(name)
 
     def call(self, name: str, params: dict, caller: MemoryCaller | None = None) -> Any:
-        """全局调用入口：resolve → 等级校验 → 执行 → 审计。
+        """全局调用入口：resolve → 等级校验 → 执行 → 审计（+ 遥测）。
 
         调用方权限不足抛 RegistryError；工具内部异常原样上抛（调用方兜底）。
+        遥测埋点（fail-open）：成功/失败/越权都写 telemetry events（归并到当前活跃 trace）。
         """
         spec = self.resolve(name)
         if spec is None:
@@ -103,6 +116,7 @@ class GlobalRegistry:
                 action=f"call:{name}", module="tools", session_id=(caller or SYSTEM_CALLER).session_id,
                 result="deny",
             )
+            _telemetry_tool(name, params, "deny")
             raise RegistryError(f"调用方 {(caller or SYSTEM_CALLER).name} 权限不足以调用工具 {name}")
         try:
             result = spec.fn(**params)
@@ -111,6 +125,7 @@ class GlobalRegistry:
                 action=f"call:{name}", module="tools", session_id=(caller or SYSTEM_CALLER).session_id,
                 result="ok",
             )
+            _telemetry_tool(name, params, "ok")
             return result
         except Exception:
             AuditLogger.log(
@@ -118,6 +133,7 @@ class GlobalRegistry:
                 action=f"call:{name}", module="tools", session_id=(caller or SYSTEM_CALLER).session_id,
                 result="error",
             )
+            _telemetry_tool(name, params, "error")
             raise
 
     def llm_tool_spec(self) -> list[dict]:

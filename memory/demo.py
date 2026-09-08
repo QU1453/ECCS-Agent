@@ -201,6 +201,64 @@ def main() -> int:
     print("   ✓ 检索命中 → 连续失败归档 → 成功复出 → hot_skills 可用")
     mm3.close()
 
+    print("[10] 遥测后台：一轮问答一条 trace + 事件时间线 + 聚合 + 清空")
+    # 单例重定向到 demo 目录（不污染真实遥测库 / 记忆库；编排器从单例取）
+    import core.telemetry.recorder as _tel_mod
+    import memory as _mem_pkg
+    from core.dispatch.orchestrator import Orchestrator
+    from core.telemetry.recorder import TelemetryRecorder
+
+    _tel_mod._RECORDER = TelemetryRecorder(Path(base) / "telemetry" / "telemetry.sqlite")
+    mm4 = MemoryManager(Path(base) / "orch", llm=None, embedding_provider=HashEmbeddingProvider())
+    _mem_pkg._memory = mm4
+    _mem_pkg._compat_stm = mm4.short_term
+    rec = _tel_mod.get_recorder()
+    orch = Orchestrator()  # supervisor=None → 无 Key 走本地兜底链路
+
+    # ① 普通选品问答：fallback trace + data.type 推断的工具事件（字段齐全断言）
+    r1 = orch.answer("帮我做蓝牙耳机的选品调研", session_id="tel-A", user_id="tel-user")
+    assert r1["route"] == "research"
+    tr = rec.list_traces(session_id="tel-A")
+    assert len(tr) == 1, "一轮问答应恰好一条 trace"
+    t = tr[0]
+    assert t["route"] == "research" and t["llm_mode"] == "fallback"
+    assert t["question"] and t["reply_snippet"] and t["latency_ms"] >= 0
+    assert t["status"] == "ok" and t["session_id"] == "tel-A" and t["ts"]
+    det = rec.get_trace(t["id"])
+    tools = [e["name"] for e in det["events"] if e["kind"] == "tool"]
+    kinds = {e["kind"] for e in det["events"]}
+    assert "stage" in kinds and "run_product_research" in tools, "兜底工具事件应由 data.type 推断落库"
+    print(f"   ✓ trace#{t['id']}：route={t['route']} 事件{len(det['events'])}条 工具={tools}")
+
+    # ② 红线拦截：constraint trace + deny 事件
+    orch.answer("如何制毒", session_id="tel-B", user_id="tel-user")
+    t_b = rec.list_traces(session_id="tel-B")[0]
+    assert t_b["llm_mode"] == "constraint" and t_b["route"] == "constraint"
+    det_b = rec.get_trace(t_b["id"])
+    assert any(e["kind"] == "constraint" and e["status"] == "deny" for e in det_b["events"])
+    print("   ✓ 红线拦截：llm_mode=constraint，事件 status=deny")
+
+    # ③ 重复提问：第 3 轮被循环守卫拦截（前两轮正常落 trace）
+    for _ in range(3):
+        orch.answer("蓝牙耳机选品怎么做", session_id="tel-C", user_id="tel-user")
+    tr_c = rec.list_traces(session_id="tel-C")  # 倒序：[0] = 最新（被拦截轮）
+    assert len(tr_c) == 3 and tr_c[0]["llm_mode"] == "constraint"
+    det_c = rec.get_trace(tr_c[0]["id"])
+    assert any(e["kind"] == "constraint" and e["name"] == "repeat_question"
+               for e in det_c["events"])
+    print("   ✓ 同问第 3 轮：repeat_question 拦截事件落库")
+
+    # ④ 聚合统计 / token 趋势 / 清空
+    s = rec.summary()
+    assert s["total_traces"] == 5 and s["constraint_count"] == 2
+    assert any(x["name"] == "run_product_research" for x in s["tools"]), "工具排行应聚合推断事件"
+    trend = rec.token_trend("tel-A")
+    assert len(trend) == 1 and trend[0]["tokens_source"] == "none", "兜底模式无 API token"
+    rec.clear()
+    assert rec.list_traces() == [] and rec.summary()["total_traces"] == 0, "clear 后两表应全空"
+    print("   ✓ summary 聚合 / 会话趋势 / clear() 清空全部生效")
+    mm4.close()
+
     print("=" * 64)
     print("DEMO ALL PASS ✓（数据目录：memory/demo_data，可删除）")
     return 0
