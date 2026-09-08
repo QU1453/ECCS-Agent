@@ -103,7 +103,8 @@ class AgentService:
     def clear_session(self, session_id: str) -> list[str]:
         """真清空：清除该会话在全部专职智能体下的 checkpoint 线程与压缩摘要。
 
-        直接操作 checkpointer（不经过 Supervisor），无 Key 兜底模式下同样有效。
+        直接操作 checkpointer（不经过 Supervisor），无 Key 兜底模式下同样有效；
+        约束层（轮次预算 / 循环熔断标记）一并复位。
         """
         stm = get_short_term()
         cleared = []
@@ -111,6 +112,10 @@ class AgentService:
             sid = agent_session_id(name, session_id)
             stm.clear(sid)  # checkpoint 线程 + 摘要行一并清除
             cleared.append(sid)
+        # 约束层复位：熔断解除、频率窗口与轮次预算清零
+        from core.constraint import get_constraint_layer
+
+        get_constraint_layer().reset(session_id)
         return cleared
 
 

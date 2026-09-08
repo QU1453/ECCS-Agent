@@ -52,3 +52,20 @@ SKILL_HOT_INJECT_TOP: int = int(os.getenv("SKILL_HOT_INJECT_TOP", "3"))
 
 # 总结智能体模型（默认跟随主模型 glm-5.3-flash）
 SUMMARIZER_MODEL: str = os.getenv("SUMMARIZER_MODEL", "").strip() or MODEL_ID
+
+# ===== 约束层配置槽（core/constraint/，见 README 约束层章节）=====
+# 单轮输入长度上限（字符数；超长否决，防 token 灌注）
+CONSTRAINT_MAX_INPUT_CHARS: int = int(os.getenv("CONSTRAINT_MAX_INPUT_CHARS", "4000"))
+
+# 单会话轮次预算（超出后建议结束谈话开新会话）
+CONSTRAINT_MAX_SESSION_TURNS: int = int(os.getenv("CONSTRAINT_MAX_SESSION_TURNS", "200"))
+
+# 循环守卫：连续重复提问阈值（第 N 次相同问题时打断引导）
+CONSTRAINT_LOOP_REPEAT_Q: int = int(os.getenv("CONSTRAINT_LOOP_REPEAT_Q", "3"))
+
+# 循环守卫：连续雷同回复阈值
+CONSTRAINT_LOOP_REPEAT_A: int = int(os.getenv("CONSTRAINT_LOOP_REPEAT_A", "3"))
+
+# 循环守卫：连续兜底次数达到该值触发 LLM 熔断（该会话跳过 LLM 调用止损）
+CONSTRAINT_LOOP_FALLBACK_TRIP: int = int(os.getenv("CONSTRAINT_LOOP_FALLBACK_TRIP", "4"))
+

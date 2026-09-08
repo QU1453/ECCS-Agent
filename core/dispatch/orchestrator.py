@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """调度控制-编排器（Orchestrator）：Server 的 /api/ask 统一入口。
 
-流程（一次完整回答 = 认知层流水线）：
-  perception.input（清洗 + 意图初判）
-  → perception.context（五模块记忆 → 上下文块注入）
-  → supervisor.answer（规则路由 → 专职智能体 ReAct）
+流程（一次完整回答 = 认知层流水线 + 约束层护栏）：
+  constraint.pre_check（规则红线 → 框架预算 → 循环守卫；命中即否决）
+  → perception.input（清洗 + 意图初判）
+  → perception.context（五模块记忆 + 约束层提示 → 上下文块注入）
+  → supervisor.answer（规则路由 → 专职智能体 ReAct；熔断会话直接跳过）
   → 失败时按路由落本地规则兜底（research/listing 各自 classic_reply）
+  → constraint.post_check（输出脱敏 + 会话记账）
   → output.validator / output.formatter（清洗 + {reply, intent, data, route}）
 
 supervisor 仍可直接被调用（agents 层独立可用），本编排器是认知层整合入口。
@@ -17,6 +19,7 @@ from agents import classic_reply
 from agents.research_agent import classic_research_reply
 from agents.listing_agent import classic_listing_reply
 from agents.supervisor import Supervisor
+from core.constraint import get_constraint_layer
 from core.output.formatter import wrap
 from core.perception.context import assemble_context
 from core.perception.input import clean_input, intent_score
@@ -45,6 +48,19 @@ class Orchestrator:
         if not q:
             return wrap({"reply": ""}, route="")
 
+        # 0) 约束层·输入前置：规则红线 → 框架预算 → 循环守卫（命中即否决本轮）
+        constraint = get_constraint_layer()
+        verdict = constraint.pre_check(q, session_id)
+        if not verdict.passed:
+            # 被否决也要记账（频率/轮次守卫的语义是“请求发生”而非“请求成功”）；
+            # fallback=False：否决不是 LLM 失败，不计入兜底熔断
+            try:
+                constraint.post_check(verdict.reply, session_id, q, fallback=False)
+            except Exception:  # noqa: BLE001
+                pass
+            return wrap({"reply": verdict.reply, "intent": "constraint_denied",
+                         "data": {"constraint": verdict.kind}}, route="constraint")
+
         # 1) 感知：意图初判（与 supervisor 规则路由同口径，供上下文组装与统计）
         scores = intent_score(q)
         route = (self.supervisor or Supervisor)._route(q)  # 规则路由唯一权威
@@ -56,8 +72,8 @@ class Orchestrator:
         except Exception:  # noqa: BLE001 - 注册表故障不影响本轮回复
             pass
 
-        # 2) 上下文组装：五模块记忆 → 系统上下文块（任一模块故障只降级该块）
-        extra: list[str] = []
+        # 2) 上下文组装：五模块记忆 + 约束层提示 → 系统上下文块（任一模块故障只降级该块）
+        extra: list[str] = [constraint.extra_system()]  # 约束层软约束块（红线行为提示）
         try:
             mm = get_memory()
             if mm is not None:
@@ -67,23 +83,39 @@ class Orchestrator:
                     if ac["blocks"].get(key):
                         extra.append(ac["blocks"][key])
         except Exception:  # noqa: BLE001 - 上下文组装失败不影响本轮问答
-            extra = []
+            pass
 
         # 3) 思考：主控调度 → 专职智能体 ReAct（失败自动退客服再试）
+        #    循环守卫已熔断的会话直接跳过 LLM（连续失败止损）
         result = None
+        used_fallback = False
+        tripped = constraint.llm_blocked(session_id)
         try:
-            if self.supervisor is not None and self.supervisor.available:
+            if not tripped and self.supervisor is not None and self.supervisor.available:
                 # 会话空（无 Key 模式）由 supervisor 内部回落；回答挂 route 标签
                 result = self.supervisor.answer(q, session_id, extra_system=extra)
         except Exception:  # noqa: BLE001 - 网络/额度异常 → 本地兜底
             result = None
         if not result or not (result.get("reply") or "").strip():
             result = self._fallback(q, route)  # 本地规则兜底
+            used_fallback = True
+            if tripped:
+                # 熔断会话：兜底回复前附熔断说明，提示用户排查
+                result = dict(result)
+                result["reply"] = f"{constraint.trip_reply()}\n{result.get('reply', '')}"
             # 兜底模式下也把本轮对话写入短期记忆线程，保证「结束谈话」总结有原文可依
             try:
                 self._record_fallback_turn(route, session_id, q, result.get("reply", ""))
             except Exception:  # noqa: BLE001
                 pass
+        # 3.5) 约束层·输出复查：脱敏（密钥/内部信息）+ 会话记账（轮次/循环信号）
+        try:
+            if result and result.get("reply"):
+                result["reply"] = constraint.post_check(
+                    result["reply"], session_id, q, fallback=used_fallback
+                )
+        except Exception:  # noqa: BLE001 - 约束层故障不影响已生成的回复
+            pass
 
         # 4) 输出：清洗 + 标准契约
         return wrap(result, route=route if result is None or not result.get("route") else result.get("route"))
