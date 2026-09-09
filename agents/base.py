@@ -16,6 +16,9 @@
 """
 from __future__ import annotations
 
+import functools
+import inspect
+
 from config import MODEL_ID
 from core.cognition.react import (  # ReAct 引擎提炼到认知层（思考推理），此处薄封装重导出
     _HAS_LANGGRAPH,
@@ -25,6 +28,7 @@ from core.cognition.react import (  # ReAct 引擎提炼到认知层（思考推
     is_japanese,
 )
 from memory import get_memory, get_short_term, thread_id_for
+from memory.access import MemoryCaller
 from tools import lookup_order, recommend_for
 
 # 兼容旧引用（如 agents/customer_service.py 的 from .base import is_japanese）
@@ -35,6 +39,48 @@ try:
     ChatOpenAI = _ChatOpenAI
 except Exception:  # pragma: no cover - 离线环境 / 未安装依赖时
     pass
+
+
+def _guard_tool(fn):
+    """约束层挂载：agent 直连工具统一过验证层（权限/路径/网络/危险 + hook）与循环守卫。
+
+    - 拦截：不执行原函数，把错误提示文本作为工具结果返回（随 ToolMessage 进入
+      消息列表，agent 读到后可自行调整策略）；
+    - 软干预：工具结果末尾追加 <system-reminder>（相同调用提醒 / [A,B]×3 交替提醒）；
+    - 记账：成功/失败都计入循环守卫（总量 / 连败 / 完全相同签名）；
+    - 会话归并：caller.session_id 留空，循环守卫键回落到线程变量（编排器设原始会话 ID），
+      避免按 agent_session_id 拆散同一会话的计数。
+    functools.wraps 保留函数名/签名/文档，LangGraph 工具节点与遥测提取按原名工作。
+    """
+    sig = inspect.signature(fn)
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        from core.constraint.layer import get_constraint_layer
+
+        try:
+            bound = sig.bind(*args, **kwargs)
+            bound.apply_defaults()
+            params = dict(bound.arguments)
+        except TypeError as exc:
+            return f"参数错误：{exc}"
+        layer = get_constraint_layer()
+        caller = MemoryCaller(f"agent:{fn.__name__}", "L1")
+        verdict = layer.check_tool_call(fn.__name__, params, caller)
+        if not verdict.allowed:
+            return verdict.message
+        try:
+            result = fn(*args, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - 失败也记账（连败熔断依据），错误文本返回 agent
+            reminder = layer.record_tool_result(
+                fn.__name__, params, False, f"{exc.__class__.__name__}: {exc}", caller)
+            return f"工具执行失败（{exc.__class__.__name__}）：{exc}{reminder}"
+        reminder = layer.record_tool_result(fn.__name__, params, True, str(result or ""), caller)
+        if reminder and isinstance(result, str):
+            return result + reminder
+        return result
+
+    return wrapper
 
 
 def _extract_telemetry(result: dict, prev_count: int, model: str) -> dict:
@@ -104,7 +150,7 @@ class ReActAgentBase:
         self._stm = None    # 进程级单例短期记忆（压缩与推理共享同一 saver）
         self._dynamic_system: list[str] = []  # 每轮推理前重建的动态系统上下文（不落 checkpoint）
         if not api_key:
-            self.reason = "未配置 OPENAI_API_KEY，运行于本地规则兜底模式"
+            self.reason = "未配置 GLM_API（或 OPENAI_API_KEY），运行于本地规则兜底模式"
             return
         if not _HAS_LANGGRAPH:
             self.reason = "未安装 langgraph/langchain-openai，运行于本地规则兜底模式"
@@ -115,8 +161,10 @@ class ReActAgentBase:
             # 压缩器注入同一 llm，超阈值裁剪时滚动摘要会回流进线程（不丢上下文）；
             # prompt 用动态 callable：长期记忆/日语提示每轮重建，不进 checkpoint 历史
             self._stm = get_short_term(llm=llm)
+            # 约束层挂载：直连工具逐个包上验证层 + 循环守卫（不改类属性，实例级包装）
+            self._guarded_tools = [_guard_tool(t) for t in (self.tools or [])]
             self._graph = _build_react_agent(
-                llm, self.tools, self._dynamic_prompt, checkpointer=self._stm.saver
+                llm, self._guarded_tools, self._dynamic_prompt, checkpointer=self._stm.saver
             )
         except Exception as exc:  # noqa: BLE001
             self.reason = f"Agent 初始化失败（{exc.__class__.__name__}: {exc}）"
@@ -138,6 +186,13 @@ class ReActAgentBase:
             return None
         try:
             config = {"configurable": {"thread_id": thread_id_for(session_id)}}
+            # 循环守卫会话归并：编排器未设置线程变量时（直调 agent）兜底为本次会话 ID
+            try:
+                from core.constraint.layer import ensure_current_session
+
+                ensure_current_session(session_id)
+            except Exception:  # noqa: BLE001
+                pass
             # 每轮重建动态系统上下文（经 _dynamic_prompt 组装，不落 checkpoint 历史）：
             # 1) 长期记忆（用户事实 + RAG 召回）——空库/hnswlib 不可用时为零开销路径；
             # 2) 编排层注入块（extra_system）：五模块记忆的系统上下文；

@@ -19,8 +19,13 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")  # 读取本地密钥配置（已被 .gitignore 拦截）
 
 # ===== LLM 配置槽（所有智能体共用，OpenAI 兼容协议）=====
-# API Key：真实密钥只放 .env / 环境变量，代码与仓库中不出现
-API_KEY: str | None = os.getenv("OPENAI_API_KEY", "").strip() or None
+# API Key：优先读 GLM_API（智谱密钥环境变量名），兼容旧槽位 OPENAI_API_KEY；
+# 真实密钥只放 .env / 环境变量，代码与仓库中不出现
+API_KEY: str | None = (
+    os.getenv("GLM_API", "").strip()
+    or os.getenv("OPENAI_API_KEY", "").strip()
+    or None
+)
 
 # 请求地址：默认智谱 GLM 开放平台（与默认模型 glm-5.3-flash 配套，OpenAI 兼容协议）；
 # 改用 OpenAI 官方时显式设为 https://api.openai.com/v1
@@ -68,4 +73,56 @@ CONSTRAINT_LOOP_REPEAT_A: int = int(os.getenv("CONSTRAINT_LOOP_REPEAT_A", "3"))
 
 # 循环守卫：连续兜底次数达到该值触发 LLM 熔断（该会话跳过 LLM 调用止损）
 CONSTRAINT_LOOP_FALLBACK_TRIP: int = int(os.getenv("CONSTRAINT_LOOP_FALLBACK_TRIP", "4"))
+
+# ===== 验证层配置槽（core/constraint/validator.py：工具调用前置四道检查）=====
+# 权限模式四档：plan（只读）/ ask（写操作需人工确认）/ accept（低风险写自动放行）/ bypass（全放开）
+# 项目精度优先：默认只开 plan，待逐步信任机制就绪后逐档放开
+AGENT_PERMISSION_MODE: str = os.getenv("AGENT_PERMISSION_MODE", "plan").strip().lower()
+
+# 写/执行类工具名单（这些工具会改变状态，plan/ask 模式下被拦截）；
+# 新增有副作用的工具必须在此登记，或命名命中 TOOL_WRITE_NAME_RE
+TOOL_WRITE_TOOLS: set[str] = {
+    t.strip() for t in os.getenv(
+        "TOOL_WRITE_TOOLS", "register_return,handle_return").split(",") if t.strip()
+}
+
+# 路径检查：允许访问的根目录（绝对路径必须在根内；相对路径禁止 .. 穿越）
+TOOL_PATH_ROOTS: list[str] = [
+    p.strip() for p in os.getenv("TOOL_PATH_ROOTS", str(BASE_DIR)).split(";") if p.strip()
+]
+
+# 网络访问策略：deny（全禁）/ allowlist（仅白名单域名）/ allow（放开，仍禁云元数据端点）
+TOOL_NET_POLICY: str = os.getenv("TOOL_NET_POLICY", "allowlist").strip().lower()
+TOOL_NET_ALLOW_HOSTS: list[str] = [
+    h.strip().lower() for h in os.getenv("TOOL_NET_ALLOW_HOSTS", "").split(",") if h.strip()
+]
+
+# ===== 循环守卫配置槽（core/constraint/tool_loop.py：agent 循环防打转）=====
+# 单会话工具调用总量上限（超出即熔断，后续工具调用全部拒绝）
+TOOL_LOOP_MAX_CALLS: int = int(os.getenv("TOOL_LOOP_MAX_CALLS", "40"))
+
+# 连续失败次数上限（工具连续抛错达阈值即熔断）
+TOOL_LOOP_MAX_CONSEC_FAILS: int = int(os.getenv("TOOL_LOOP_MAX_CONSEC_FAILS", "5"))
+
+# 完全相同调用检测的记录窗口（保留最近 N 条调用；签名 = MD5(工具名+参数)前12位 + 结果前20字符）
+TOOL_LOOP_IDENTICAL_WINDOW: int = int(os.getenv("TOOL_LOOP_IDENTICAL_WINDOW", "10"))
+
+# ===== 预算熔断配置槽（core/constraint/budget.py）=====
+# 单会话 token 总预算（输入+输出累计，超出后 LLM 熔断转离线答复）
+SESSION_TOKEN_BUDGET: int = int(os.getenv("SESSION_TOKEN_BUDGET", "100000"))
+
+# 单会话金额预算（元；0 = 不启用金额熔断）
+SESSION_COST_BUDGET_CNY: float = float(os.getenv("SESSION_COST_BUDGET_CNY", "0"))
+
+# 计费单价（元 / 百万 token）：按智谱账单实际价格填写，默认 0 = 只按 token 熔断
+PRICE_INPUT_CNY_PER_M: float = float(os.getenv("PRICE_INPUT_CNY_PER_M", "0"))
+PRICE_OUTPUT_CNY_PER_M: float = float(os.getenv("PRICE_OUTPUT_CNY_PER_M", "0"))
+
+# 上下文五段预算分配（百分比，合计 100）：
+# 输出预留 15% / 系统提示词 10% / 长期记忆 5% / 当前任务 20% / 历史会话（短期+知识库）50%
+BUDGET_PCT_OUTPUT: int = int(os.getenv("BUDGET_PCT_OUTPUT", "15"))
+BUDGET_PCT_SYSTEM: int = int(os.getenv("BUDGET_PCT_SYSTEM", "10"))
+BUDGET_PCT_LONG_TERM: int = int(os.getenv("BUDGET_PCT_LONG_TERM", "5"))
+BUDGET_PCT_TASK: int = int(os.getenv("BUDGET_PCT_TASK", "20"))
+BUDGET_PCT_HISTORY: int = int(os.getenv("BUDGET_PCT_HISTORY", "50"))
 

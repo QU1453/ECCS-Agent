@@ -21,7 +21,7 @@ from agents import classic_reply
 from agents.research_agent import classic_research_reply
 from agents.listing_agent import classic_listing_reply
 from agents.supervisor import Supervisor
-from core.constraint import get_constraint_layer
+from core.constraint import get_constraint_layer, set_current_session
 from core.output.formatter import wrap
 from core.perception.context import assemble_context
 from core.perception.input import clean_input, intent_score
@@ -85,8 +85,12 @@ class Orchestrator:
                             reply_snippet=verdict.reply, llm_mode="constraint",
                             status="ok", latency_ms=int((time.perf_counter() - t0) * 1000))
             set_current_trace(0)  # 结束：旁路埋点不再归并到本 trace
+            set_current_session("")  # 结束：工具循环守卫的会话键归并停止
             return wrap({"reply": verdict.reply, "intent": "constraint_denied",
                          "data": {"constraint": verdict.kind}}, route="constraint")
+
+        # 会话线程变量：agent 直连工具包装器据此把循环守卫计数归并到本会话
+        set_current_session(session_id)
 
         # 1) 感知：意图初判（与 supervisor 规则路由同口径，供上下文组装与统计）
         scores = intent_score(q)
@@ -143,6 +147,10 @@ class Orchestrator:
                 if tel.get("input_tokens") or tel.get("output_tokens"):
                     rec.set_tokens(trace_id, tel["input_tokens"], tel["output_tokens"],
                                    source="api")
+                    # 预算熔断记账：真实 usage 累加进会话预算（token + 单价折算金额）
+                    constraint.record_llm_usage(
+                        session_id, int(tel.get("input_tokens") or 0),
+                        int(tel.get("output_tokens") or 0))
                 for tc in tel.get("tool_calls") or []:
                     rec.add_event(trace_id, kind="tool", name=tc.get("name", ""),
                                   params=tc.get("args"))
@@ -190,6 +198,7 @@ class Orchestrator:
             error=llm_error, context_tokens=context_tokens,
         )
         set_current_trace(0)  # 结束：旁路埋点不再归并到本 trace
+        set_current_session("")  # 结束：工具循环守卫的会话键归并停止
         return wrap(result, route=route if result is None or not result.get("route") else result.get("route"))
 
     @staticmethod

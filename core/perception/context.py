@@ -87,6 +87,15 @@ def assemble_context(mm, user_id: str, session_id: str = "",
     except Exception:  # noqa: BLE001
         blocks["hot_skills"] = ""
 
+    # 6) 五段预算封顶（预算熔断·上下文分配）：输出预留 15% 不注入，其余各段按归属裁剪；
+    #    纯程序裁剪（零 token / 零 LLM），故障时退回未裁剪块（旁路容错）
+    try:
+        from core.constraint import get_constraint_layer
+
+        blocks = get_constraint_layer().budget.trim_context_blocks(blocks)
+    except Exception:  # noqa: BLE001
+        pass
+
     nonempty = [name for name, text in blocks.items() if text.strip()]
     total_tokens = sum(estimate_tokens(t) for t in blocks.values() if t)
     return {"blocks": blocks, "estimated_tokens": total_tokens, "nonempty": nonempty}

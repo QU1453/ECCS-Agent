@@ -73,6 +73,16 @@ def _telemetry_tool(name: str, params: dict, status: str) -> None:
         pass
 
 
+def _constraint_layer():
+    """约束层门面（延迟导入：constraint 包反向注册工具到本模块，防循环导入）。"""
+    try:  # noqa: BLE001 - 约束层故障不阻断工具调用（验证层 check 内部另有旁路容错）
+        from core.constraint import get_constraint_layer
+
+        return get_constraint_layer()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 class GlobalRegistry:
     """全局注册表单例：跨模块解析 + 调用 + 审计。线程安全。"""
 
@@ -101,9 +111,10 @@ class GlobalRegistry:
         return self._tools.get(name)
 
     def call(self, name: str, params: dict, caller: MemoryCaller | None = None) -> Any:
-        """全局调用入口：resolve → 等级校验 → 执行 → 审计（+ 遥测）。
+        """全局调用入口：resolve → 等级校验 → 验证层 → 执行 → 记账 → 审计（+ 遥测）。
 
-        调用方权限不足抛 RegistryError；工具内部异常原样上抛（调用方兜底）。
+        调用方权限不足抛 RegistryError；验证层/循环守卫拦截时同样抛 RegistryError
+        （message = 返回给 agent 的错误提示）。工具内部异常原样上抛（调用方兜底）。
         遥测埋点（fail-open）：成功/失败/越权都写 telemetry events（归并到当前活跃 trace）。
         """
         spec = self.resolve(name)
@@ -118,6 +129,18 @@ class GlobalRegistry:
             )
             _telemetry_tool(name, params, "deny")
             raise RegistryError(f"调用方 {(caller or SYSTEM_CALLER).name} 权限不足以调用工具 {name}")
+        # ---- 约束层挂载：验证层四道检查（权限/路径/网络/危险）+ 循环守卫 ----------------
+        layer = _constraint_layer()
+        if layer is not None:
+            verdict = layer.check_tool_call(name, params, caller)
+            if not verdict.allowed:
+                AuditLogger.log(
+                    actor=(caller or SYSTEM_CALLER).name, actor_level=(caller or SYSTEM_CALLER).level,
+                    action=f"call:{name}", module="tools", session_id=(caller or SYSTEM_CALLER).session_id,
+                    result="deny",
+                )
+                _telemetry_tool(name, params, "deny")
+                raise RegistryError(verdict.message)
         try:
             result = spec.fn(**params)
             AuditLogger.log(
@@ -126,8 +149,15 @@ class GlobalRegistry:
                 result="ok",
             )
             _telemetry_tool(name, params, "ok")
+            if layer is not None:
+                reminder = layer.record_tool_result(
+                    name, params, True, str(result or ""), caller)
+                if reminder and isinstance(result, str):
+                    return result + reminder
             return result
         except Exception:
+            if layer is not None:
+                layer.record_tool_result(name, params, False, "error", caller)
             AuditLogger.log(
                 actor=(caller or SYSTEM_CALLER).name, actor_level=(caller or SYSTEM_CALLER).level,
                 action=f"call:{name}", module="tools", session_id=(caller or SYSTEM_CALLER).session_id,

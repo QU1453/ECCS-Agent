@@ -10,16 +10,24 @@
 统一门面 ConstraintLayer（layer.py）：编排器只跟它打交道；
 旁路容错——约束层自身故障时降级为“无约束”，绝不阻断问答主链路。
 """
+from .budget import BudgetGuard
 from .framework import FrameworkGuard, FrameworkVerdict
-from .layer import ConstraintLayer, ConstraintVerdict, get_constraint_layer
+from .layer import (ConstraintLayer, ConstraintVerdict, ToolCallVerdict,
+                    ensure_current_session, get_constraint_layer, get_current_session,
+                    set_current_session)
 from .loop_guard import LoopGuard, LoopSignal
 from .rules import RuleGuard, RuleVerdict
+from .tool_loop import ToolLoopGuard
+from .validator import ToolValidator, ToolVerdict
 
 __all__ = [
-    "ConstraintLayer", "ConstraintVerdict", "get_constraint_layer",
+    "ConstraintLayer", "ConstraintVerdict", "ToolCallVerdict", "get_constraint_layer",
+    "set_current_session", "ensure_current_session", "get_current_session",
     "RuleGuard", "RuleVerdict",
     "FrameworkGuard", "FrameworkVerdict",
     "LoopGuard", "LoopSignal",
+    "ToolValidator", "ToolVerdict",
+    "ToolLoopGuard", "BudgetGuard",
 ]
 
 # 触发局部工具注册表登记（导入即注册，与 tools/ 模块同模式）

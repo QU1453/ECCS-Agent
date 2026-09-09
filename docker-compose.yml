@@ -1,5 +1,5 @@
 # 一键启动：docker compose up -d --build
-# 密钥：把 OPENAI_API_KEY 写入宿主机 .env（已被 .gitignore / .dockerignore 拦截），
+# 密钥：把 GLM_API 写入宿主机 .env（已被 .gitignore / .dockerignore 拦截），
 #       经 compose 注入容器环境变量，不会写进镜像。留空则 Agent 走本地规则兜底。
 # 注意：模型 / 地址的默认值只在 config.py 定义一处（glm-5.3-flash + 智谱），
 #       本文件仅透传环境变量，不自带默认值，避免两边默认值不一致。
@@ -11,10 +11,24 @@ services:
     ports:
       - "8623:8623"
     environment:
+      GLM_API: ${GLM_API:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-}
       SERVER_HOST: 0.0.0.0
+      # 验证层（默认 plan 只读；逐步信任机制就绪后再放开 ask/accept）
+      AGENT_PERMISSION_MODE: ${AGENT_PERMISSION_MODE:-plan}
+      TOOL_NET_POLICY: ${TOOL_NET_POLICY:-allowlist}
+      TOOL_NET_ALLOW_HOSTS: ${TOOL_NET_ALLOW_HOSTS:-}
+      # 循环守卫
+      TOOL_LOOP_MAX_CALLS: ${TOOL_LOOP_MAX_CALLS:-40}
+      TOOL_LOOP_MAX_CONSEC_FAILS: ${TOOL_LOOP_MAX_CONSEC_FAILS:-5}
+      TOOL_LOOP_IDENTICAL_WINDOW: ${TOOL_LOOP_IDENTICAL_WINDOW:-10}
+      # 预算熔断
+      SESSION_TOKEN_BUDGET: ${SESSION_TOKEN_BUDGET:-100000}
+      SESSION_COST_BUDGET_CNY: ${SESSION_COST_BUDGET_CNY:-0}
+      PRICE_INPUT_CNY_PER_M: ${PRICE_INPUT_CNY_PER_M:-0}
+      PRICE_OUTPUT_CNY_PER_M: ${PRICE_OUTPUT_CNY_PER_M:-0}
     volumes:
       # 运行时数据持久化（容器重建不丢）：短期记忆 checkpoint / 长期记忆 ANN /
       # 权限审计 / 遥测库（调试后台 /debug 的数据源）
