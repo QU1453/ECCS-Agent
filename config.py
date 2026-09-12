@@ -126,3 +126,22 @@ BUDGET_PCT_LONG_TERM: int = int(os.getenv("BUDGET_PCT_LONG_TERM", "5"))
 BUDGET_PCT_TASK: int = int(os.getenv("BUDGET_PCT_TASK", "20"))
 BUDGET_PCT_HISTORY: int = int(os.getenv("BUDGET_PCT_HISTORY", "50"))
 
+# ===== 工具层配置槽（core/toolkit/：MCP 格式工具注册 / 参数校验 / 调用）=====
+# 配置黑名单：开发者可禁用某些工具（逗号分隔；命中者永不暴露给模型）
+TOOL_DISABLED: set[str] = {
+    t.strip() for t in os.getenv("TOOL_DISABLED", "").split(",") if t.strip()
+}
+
+# MCP client 单次调用超时（秒）与重试上限（含首次，最多 5 次仍失败即退出）
+TOOL_CALL_TIMEOUT_S: float = float(os.getenv("TOOL_CALL_TIMEOUT_S", "10"))
+TOOL_CALL_MAX_RETRIES: int = int(os.getenv("TOOL_CALL_MAX_RETRIES", "5"))
+
+# 规划阶段基础轮数（阶段一：前 N 轮只暴露 planning 工具；实际轮数与任务结构复杂度正相关）
+TOOL_PLANNING_ROUNDS_BASE: int = int(os.getenv("TOOL_PLANNING_ROUNDS_BASE", "2"))
+
+# MCP 协议：版本号 / 传输方式（inprocess=同进程直连；stdio=独立 server 进程）
+MCP_PROTOCOL_VERSION: str = os.getenv("MCP_PROTOCOL_VERSION", "2024-11-05")
+MCP_TRANSPORT: str = os.getenv("MCP_TRANSPORT", "inprocess").strip().lower()
+MCP_SERVER_NAME: str = os.getenv("MCP_SERVER_NAME", "eccs-tool-server")
+MCP_SERVER_VERSION: str = "1.0.0"
+

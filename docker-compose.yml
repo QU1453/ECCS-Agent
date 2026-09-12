@@ -29,6 +29,12 @@ services:
       SESSION_COST_BUDGET_CNY: ${SESSION_COST_BUDGET_CNY:-0}
       PRICE_INPUT_CNY_PER_M: ${PRICE_INPUT_CNY_PER_M:-0}
       PRICE_OUTPUT_CNY_PER_M: ${PRICE_OUTPUT_CNY_PER_M:-0}
+      # 工具层（MCP 格式：注册/校验/调用）
+      TOOL_DISABLED: ${TOOL_DISABLED:-}
+      TOOL_CALL_TIMEOUT_S: ${TOOL_CALL_TIMEOUT_S:-10}
+      TOOL_CALL_MAX_RETRIES: ${TOOL_CALL_MAX_RETRIES:-5}
+      TOOL_PLANNING_ROUNDS_BASE: ${TOOL_PLANNING_ROUNDS_BASE:-2}
+      MCP_TRANSPORT: ${MCP_TRANSPORT:-inprocess}
     volumes:
       # 运行时数据持久化（容器重建不丢）：短期记忆 checkpoint / 长期记忆 ANN /
       # 权限审计 / 遥测库（调试后台 /debug 的数据源）
